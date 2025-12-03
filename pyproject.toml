@@ -1,0 +1,32 @@
+[project]
+name = "csfs"
+version = "0.1.0"
+description = "CSFS: Cluster-based Sequential Feature Selection for renewable energy prediction."
+requires-python = ">=3.11"
+dependencies = [
+    "astral>=3.2",
+    "flaml>=2.3.5",
+    "folium>=0.20.0",
+    "imbalanced-learn>=0.12.4",
+    "imblearn>=0.0",
+    "lightgbm>=4.6.0",
+    "lightning>=2.5.2",
+    "matplotlib>=3.10.5",
+    "notebook>=7.4.5",
+    "numpy>=2.3.2",
+    "openoa>=3.1.2",
+    "openpyxl>=3.1.5",
+    "pandas>=2.3.1",
+    "pandas-stubs>=2.3.0.250703",
+    "psutil>=7.0.0",
+    "pvlib>=0.13.1",
+    "pwlf>=2.5.2",
+    "pyarrow>=21.0.0",
+    "scikit-learn>=1.7.1",
+    "scipy>=1.16.1",
+    "scipy-stubs==1.16.2.4",
+    "seaborn>=0.13.2",
+    "torch>=2.7.1",
+    "tqdm>=4.67.1",
+    "xgboost>=3.0.3",
+]
