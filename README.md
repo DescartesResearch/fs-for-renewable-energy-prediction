@@ -1,3 +1,8 @@
+---
+header-includes:
+  - \usepackage[linesnumbered,ruled,vlined]{algorithm2e}
+---
+
 # CSFS — Cluster-based Sequential Feature Selection for Renewable Energy Prediction
 
 A research-focused Python toolkit for preprocessing, feature selection and AutoML-driven model training for renewable
@@ -14,6 +19,7 @@ Table of contents
     - [Run a single experiment](#run-a-single-experiment)
     - [Orchestrate multiple experiments](#orchestrate-multiple-experiments)
 - [Project layout](#project-layout)
+- [CSFS algorithm pseudocode](#csfs-algorithm-pseudocode)
 - [If you need help...](#if-you-need-help)
 
 ## Project Description
@@ -142,6 +148,10 @@ The cpu cores to be used, cpu cores per experiment, and experiment ids are confi
 - `main.py` — CLI entrypoint to run single experiments end-to-end
 - `experiment_runner.py` — small orchestration helper for parallel experiment execution
 - `run_experiments.sh` - definition of all experiments conducted for the paper
+
+## CSFS algorithm pseudocode
+
+![](./CSFS%20Pseudocode.png "Pseudocode for the Cluster-based Sequential Feature Selection Algorithm")
 
 ## If you need help...
 
