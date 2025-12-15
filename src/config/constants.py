@@ -7,13 +7,16 @@ class Paths:
     """
     PROJECT = Path(__file__).resolve().parents[2]
     DATASETS = PROJECT / 'datasets'
-    EDP_DATASET_PATH = DATASETS / 'edp_dataset'
-    PVOD_PATH = DATASETS / 'pvod'
+    EDP_DATASET_PATH = DATASETS / 'edp'
+    PVOD_PATH = DATASETS / 'PVOD'
+
     LOGS = PROJECT / "logs"
-    DATA_CACHE = PROJECT / "cache"
-    TMP = PROJECT / "tmp"
-    FIGURES = PROJECT / "paper_figures"
-    TABLES = PROJECT / "paper_tables"
+
+    REPORT = PROJECT / "report"
+    FIGURES = REPORT / "paper_figures"
+    TABLES = REPORT / "paper_tables"
+
+    MPLSTYLES = PROJECT / "src" / "mplstyles"
 
 
 class Constants:
@@ -50,13 +53,6 @@ class Constants:
 
     # Set this to True to log to the File System
     USE_FS_LOGGER = True
-    # Neptune AI Logger Project, API Token and prefix of the Run IDs
-    USE_NEPTUNE_LOGGER = False
-    NEPTUNE_LOGGER_PROJECT = ...
-    NEPTUNE_LOGGER_API_TOKEN = ...
-    NEPTUNE_LOGGER_MODE = "async"
-    NEPTUNE_ASYNC_NO_PROGRESS_THRESHOLD = 3600 * 24
-    NEPTUNE_ASYNC_LAG_THRESHOLD = 3600 * 24 * 3
     # Setting for Matplotlib figures
     MATPLOTLIB_USETEX = True  # Latex must be installed and be added to Path environment variable
     MATPLOTLIB_FONTFAMILY = "Libertine"  # "DejaVu Sans"

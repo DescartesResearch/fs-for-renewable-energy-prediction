@@ -2,6 +2,7 @@ import copy
 import os
 import pickle
 
+import numpy as np
 import psutil
 import torch
 import io
@@ -150,3 +151,27 @@ def get_memory_usage() -> str:
     :return: String of the current memory usage in MegaBytes, for example: "123.45 MB"
     """
     return f"{psutil.Process(os.getpid()).memory_info().rss / 1e6:.2f} MB"
+
+
+def value_and_error_to_latex(mean: float, std: float, precision: int = 2, colorcoding: bool = False) -> str:
+    res = "${:.{precision}f} \\pm {:.{precision}f}$".format(mean, std, precision=precision)
+    if colorcoding:
+        if (mean - std - (0.6 / 10 ** precision)) > 0:
+            color = "darkred"
+        else:
+            color = "darkgreen"
+        res = res.replace("$", f"$\\textcolor{{{color}}}{{", 1)
+        res = res[:-1] + "}$"
+    return res
+
+def median_and_ci_to_latex(arr: np.ndarray, p: float, precision: int = 2) -> str:
+    x = (1 - p) * 100 / 2
+    ci = p * 100
+    median = np.median(arr)
+    ci_low, ci_high = np.percentile(arr, [x, 100 - x])
+    # res = "${:.{precision}f}\\% ({:.0f}\\% CI: {:.{precision}f}\\% -- {:.{precision}f}\\%)$".format(median, ci, ci_low,ci_high, precision=precision)
+    res = (
+        "${:.{p}f}\\%\\, (\\text{{{:.0f}\\% CI}}: {:.{p}f}\\!-\\!{:.{p}f}\\%)$"
+        .format(median, ci, ci_low, ci_high, p=precision)
+    )
+    return res

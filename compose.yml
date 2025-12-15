@@ -1,0 +1,38 @@
+services:
+  main:
+    build: .
+    entrypoint: [ "uv", "run", "./src/main.py" ]
+    volumes:
+      - ./src:/app/src
+      - ${REPORT_DIR}:/app/report
+      - ${DATASETS_DIR}:/app/dataset
+      - ${LOGS_DIR}:/app/logs
+
+  run_paper_experiments:
+    build: .
+    profiles: [ "run_paper_experiments" ]
+    entrypoint: [ "uv", "run", "./src/main.py",
+                  "--run_multiple_experiments",
+                  "--n_jobs", "${N_JOBS}",
+                  "--first_cpu_idx", "${FIRST_CPU_IDX}",
+                  "--last_cpu_idx", "${LAST_CPU_IDX}",
+                  "--script_path", "./src/paper_experiments.sh",
+                  "--first_experiment_idx", "0",
+                  "--last_experiment_idx", "559" ]
+    volumes:
+      - ./src:/app/src
+      - ${DATASETS_DIR}:/app/datasets
+      - ${LOGS_DIR}:/app/logs
+
+
+  generate_report:
+    build: .
+    profiles: [ "generate_report" ]
+    entrypoint: [ "uv", "run", "./src/main.py",
+                  "--generate_report",
+    ]
+    volumes:
+      - ./src:/app/src
+      - ${REPORT_DIR}:/app/report
+      - ${DATASETS_DIR}:/app/datasets
+      - ${LOGS_DIR}:/app/logs

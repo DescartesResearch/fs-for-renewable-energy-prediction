@@ -1,0 +1,12 @@
+# lncs.mplstyle
+text.usetex : True
+font.family : serif
+font.serif  : Computer Modern Roman
+figure.dpi : 300
+figure.autolayout : True
+figure.figsize : 7, 3.5
+axes.labelsize : 12
+font.size      : 12
+legend.fontsize: 10
+xtick.labelsize: 10
+ytick.labelsize: 10

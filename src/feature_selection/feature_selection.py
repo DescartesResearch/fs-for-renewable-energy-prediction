@@ -19,7 +19,7 @@ from scipy.spatial.distance import squareform
 from data.data_processing import DataFrameProcessor
 from models.models import get_automl_with_registered_models, get_sklearn_estim
 from training.logging import FSLogger
-from utils.eval import evaluate_on_test_set
+from utils.eval import evaluate_on_test_set, aggregate
 from data.data_processing import DataUtils
 
 from utils.misc import unflatten_dict, flatten_dict
@@ -930,20 +930,7 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
                 flatten_dict(validation_metrics, parent_key=f"validation/{self.curr_iteration}/{cluster_id}"))
 
     def _aggregate(self, arr: np.ndarray) -> np.floating[Any]:
-        if self.aggregation_mode == 'min':
-            return np.min(arr)
-        elif self.aggregation_mode == 'max':
-            return np.max(arr)
-        elif self.aggregation_mode == 'avg':
-            return np.mean(arr)
-        elif self.aggregation_mode == 'median':
-            return np.median(arr)
-        elif self.aggregation_mode.startswith('p='):
-            p = float(self.aggregation_mode.split('=')[1])
-            return np.percentile(arr, p)
-        else:
-            raise ValueError(
-                f"Unknown ranking_type '{self.aggregation_mode}' (choose from 'min', 'max', 'avg', 'median', 'p=<float_value>')")
+        return aggregate(self.aggregation_mode, arr)
 
     def _copy_results_and_objects(self, source: str, dest: str) -> None:
         """

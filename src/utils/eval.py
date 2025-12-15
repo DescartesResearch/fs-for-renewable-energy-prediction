@@ -1,7 +1,7 @@
 import logging
 import time
 import warnings
-from typing import Optional, Callable, Literal
+from typing import Optional, Callable, Literal, Any
 import numpy as np
 import pandas as pd
 
@@ -227,3 +227,21 @@ def evaluate_on_test_set(estimator,
         f"[evaluate_on_test_set] Calculation of scores done!")
 
     return results
+
+
+def aggregate(aggregation_mode: str, arr: np.ndarray) -> np.floating[Any] | np.ndarray:
+    if aggregation_mode == 'min':
+        return np.min(arr)
+    elif aggregation_mode == 'max':
+        return np.max(arr)
+    elif aggregation_mode == 'avg':
+        return np.mean(arr)
+    elif aggregation_mode == 'median':
+        return np.median(arr)
+    elif aggregation_mode == 'none':
+        return arr
+    elif aggregation_mode.startswith('p='):
+        p = float(aggregation_mode.split('=')[1])
+        return np.percentile(arr, p)
+    else:
+        raise ValueError(f"Unknown aggregation mode: {aggregation_mode}")

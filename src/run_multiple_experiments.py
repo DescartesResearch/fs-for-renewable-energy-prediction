@@ -5,7 +5,6 @@ import time
 from pathlib import Path
 from threading import Thread, Lock
 
-from config.constants import Paths
 import psutil
 
 
@@ -18,9 +17,8 @@ logging.basicConfig(level=logging.INFO)
 
 
 class ExperimentRunner:
-    def __init__(self, cpu_range, log_dir, script_path, n_jobs=4):
+    def __init__(self, cpu_range, script_path, n_jobs=4):
         self.cpu_range = list(cpu_range)
-        self.log_dir = Path(log_dir)
         self.script_path = script_path
         self.n_jobs = n_jobs
         self.lock = Lock()
@@ -36,7 +34,6 @@ class ExperimentRunner:
 
         env = os.environ.copy()
         env["N_JOBS"] = str(self.n_jobs)
-        env["CUDA_VISIBLE_DEVICES"] = "MIG-a1208c4e-caad-5519-9d69-6b0998c74b9f"
         cpu_list = ",".join(map(str, cpus))
         command = f"taskset --cpu-list {cpu_list} bash {self.script_path} {experiment_index}"
 
@@ -68,14 +65,32 @@ class ExperimentRunner:
             time.sleep(1)
 
 
-if __name__ == "__main__":
-    experiment_indices = range(560)
-    cpu_range = range(0, 32)
-    n_parallel_experiments = 4
-    log_dir = Paths.LOGS
-    script_path = Paths.PROJECT / "run_experiments.sh"
-    runner = ExperimentRunner(cpu_range=cpu_range,
-                              log_dir=log_dir,
-                              script_path=script_path,
-                              n_jobs=n_parallel_experiments)
-    runner.run(experiment_indices)
+def validate_args(args):
+    num_cpus = os.cpu_count()
+    if args.first_cpu_idx < 0 or args.last_cpu_idx >= num_cpus:
+        raise ValueError(f"CPU indices must be between 0 and {num_cpus - 1}.")
+    if args.first_cpu_idx is None or args.last_cpu_idx is None:
+        raise ValueError("Both first_cpu_idx and last_cpu_idx must be specified.")
+    if args.first_cpu_idx > args.last_cpu_idx:
+        raise ValueError("First CPU index must be less than or equal to last CPU index.")
+
+    # Same for experiment indices
+    if args.first_experiment_idx is None or args.last_experiment_idx is None:
+        raise ValueError("Both first_experiment_idx and last_experiment_idx must be specified.")
+    if args.first_experiment_idx > args.last_experiment_idx:
+        raise ValueError("First experiment index must be less than or equal to last experiment index.")
+    if args.first_experiment_idx < 0 or args.last_experiment_idx < 0:
+        raise ValueError("Experiment indices must be non-negative.")
+
+    if not Path(args.script_path).is_file():
+        raise ValueError(f"Script path {args.script_path} does not exist or is not a file.")
+
+    if args.n_jobs <= 0:
+        raise ValueError("Number of parallel jobs must be a positive integer.")
+
+
+def run_multiple_experiments(args):
+    runner = ExperimentRunner(cpu_range=range(args.first_cpu_idx, args.last_cpu_idx + 1),
+                              script_path=Path(args.script_path),
+                              n_jobs=args.n_jobs)
+    runner.run(range(args.first_experiment_idx, args.last_experiment_idx + 1))
