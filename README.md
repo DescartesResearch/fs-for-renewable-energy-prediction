@@ -111,7 +111,7 @@ The dataset path should contain the two subfolders `edp` and `PVOD` with the res
 datasets. Folder can be empty if you only want to use the provided logs from the experiments in the paper.
 
 The logs path is where the experiment logs will be saved. You can also use the provided logs in the following Zenodo
-repository, if you want to skip running the experiments yourself: [Link to Zenodo](https://doi.org/10.5281/zenodo.17940526/)
+repository, if you want to skip running the experiments yourself: [Link to Zenodo](https://zenodo.org/records/17940526)
 
 The report path is where the generated figures, tables, and numbers from the paper will be saved.
 
@@ -157,7 +157,7 @@ The `paper_experiments.sh` script contains the definition of all experiments (in
 After the experiments have finished and all experiment logs are saved to the logs directory (defined above), you can
 generate the report (figures, tables, numbers).
 Alternatively, instead of re-running the experiments yourself, you can use the provided logs in the following Zenodo
-repository: [Link to Zenodo](https://doi.org/10.5281/zenodo.17940526/)
+repository: [Link to Zenodo](https://zenodo.org/records/17940526)
 
 The report generation script can be executed as follows:
 
