@@ -57,15 +57,22 @@ We provide two options to set up and run the project:
 
 #### 1. Set up project and dependencies (using uv)
 
-DOCKER:
+<details>
+<summary><strong>Docker</strong></summary>
+
 No manual setup needed.
 
-MANUAL LOCAL SETUP:
+</details>
+
+<details>
+<summary><strong>Local</strong></summary>
 
 1. Clone the repository.
 2. If necessary, install uv: See the
    official [uv install instructions](https://docs.astral.sh/uv/getting-started/installation/)
 3. In the project root directory, run `uv sync` command to create and update the virtual environment `.venv`
+
+</details>
 
 #### 2. Download datasets
 
@@ -89,7 +96,9 @@ MANUAL LOCAL SETUP:
 
 <details>
 <summary><strong>Docker</strong></summary>
+
 Adapt the environment variables in the `.env` file.
+
 </details>
 
 <details>
@@ -97,6 +106,7 @@ Adapt the environment variables in the `.env` file.
 
 - In the config file `config/constants.py`, set the path to the datasets folder `Paths.DATASETS` correctly.
 </details>
+
 The dataset path should contain the two subfolders `edp` and `PVOD` with the respective downloaded (and extracted)
 datasets. Folder can be empty if you only want to use the provided logs from the experiments in the paper.
 The logs path is where the experiment logs will be saved. You can also use the provided logs in the following Zenodo
