@@ -1114,7 +1114,7 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
 
         # copy logged results from origin cluster to new cluster for current iteration
         for s in ['training', 'validation']:
-            source = f"{s}/{self.curr_iteration}/{origin_cluster_id}"
+            source = f"{s}/{self.curr_iteration}/{feature_name}"
             dest = f"{s}/{self.curr_iteration}/{new_cluster_id}"
             self._copy_results_and_objects(source, dest)
 
