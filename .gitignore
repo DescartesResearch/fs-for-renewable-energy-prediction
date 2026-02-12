@@ -1,1 +1,7 @@
 .venv
+.idea
+.github
+.env
+report
+report_test
+*.pyc
