@@ -14,7 +14,7 @@ from numpy.typing import ArrayLike
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers.logger import Logger
 from lightning.pytorch.utilities import rank_zero_only
-from lightning.pytorch.utilities.model_summary import ModelSummary
+from lightning.pytorch.utilities.model_summary.model_summary import ModelSummary
 from matplotlib import pyplot as plt
 from torch import Tensor
 from torch.nn import Module
@@ -103,6 +103,14 @@ class ExtendedLogger(Logger, ABC):
     def log_metrics_array(self, metrics: Dict[str, np.ndarray | float], step: Optional[int] = None) -> None:
         pass
 
+    @abstractmethod
+    def has_key(self, key: str) -> bool:
+        pass
+
+    @abstractmethod
+    def copy_all_objects(self, origin_key: str, dest_key: str) -> None:
+        pass
+
 
 class DummyLogger(ExtendedLogger):
     def __init__(self):
@@ -118,6 +126,9 @@ class DummyLogger(ExtendedLogger):
 
     def log_metrics(self, metrics: Dict[str, float], step: Optional[int] = None) -> None:
         pass
+
+    def has_key(self, key: str) -> bool:
+        return False
 
     def log_metrics_array(self, metrics: Dict[str, np.ndarray | float], step: Optional[int] = None) -> None:
         pass
@@ -357,13 +368,20 @@ class CompositeLogger(ExtendedLogger):
         for logger in self.loggers:
             logger.log_model_summary(model, max_depth)
 
+    @rank_zero_only
+    def has_key(self, key: str) -> bool:
+        for logger in self.loggers:
+            if logger.has_key(key):
+                return True
+        return False
+
 
 class FSLogger(ExtendedLogger):
     """
     Logger that logs to the file system.
     """
 
-    def __init__(self, name: str, version: Optional[str] = None, save_directory: Optional[Path] = Paths.LOGS):
+    def __init__(self, name: str, version: Optional[str] = None, save_directory: Path = Paths.LOGS):
         super().__init__()
         self._name = name
         self._version = version
@@ -387,15 +405,15 @@ class FSLogger(ExtendedLogger):
         return self._version
 
     @property
-    def save_dir(self) -> Optional[Path]:
+    def save_dir(self) -> Path:
         return self._save_dir
 
     @property
-    def root_dir(self) -> Optional[Path]:
+    def root_dir(self) -> Path:
         return self._root_dir
 
     @property
-    def log_dir(self) -> Optional[Path]:
+    def log_dir(self) -> Path:
         return self._log_dir
 
     @rank_zero_only
@@ -673,6 +691,23 @@ class FSLogger(ExtendedLogger):
     def log_model_summary(self, model: pl.LightningModule, max_depth: int = -1):
         model_str = str(ModelSummary(model=model, max_depth=max_depth))
         self.save_string("model_summary", model_str)
+
+    @rank_zero_only
+    def has_key(self, key: str) -> bool:
+        # check in-memory first
+        if key in self.metrics_values or key in self.metrics_arrays_values:
+            return True
+        else:
+            # check on disk
+            p_npy = self.log_dir / key
+            p_npy = p_npy.with_name(f"{p_npy.name}.npy")
+            p_txt = self.log_dir / key
+            p_txt = p_txt.with_name(f"{p_txt.name}.txt")
+            p_pkl = self.log_dir / key
+            p_pkl = p_pkl.with_name(f"{p_pkl.name}.pkl")
+            p_ckpt = self.log_dir / key
+            p_ckpt = p_ckpt.with_name(f"{p_ckpt.name}.ckpt")
+            return p_npy.is_file() or p_txt.is_file() or p_pkl.is_file() or p_ckpt.is_file()
 
 
 def get_logger(name: str, version: Optional[str] = None):

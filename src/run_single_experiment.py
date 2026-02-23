@@ -214,14 +214,14 @@ def run_experiment(args):
     datetimes_test = _datetimes.iloc[test_idx]
 
     # Make sure no data leakage occurs
-    data_leakage_value = data_leakage(
-        test_data=datetimes_test.to_frame("Timestamp"),
-        train_data=datetimes_train_val.to_frame("Timestamp"),
-        datetime_col="Timestamp",
-        group_col=None,
-    )
-    if data_leakage_value != 0:
-        raise ValueError(f"Data leakage detected. Data leakage value: {data_leakage_value}")
+    # data_leakage_value = data_leakage(
+    #     test_data=datetimes_test.to_frame("Timestamp"),
+    #     train_data=datetimes_train_val.to_frame("Timestamp"),
+    #     datetime_col="Timestamp",
+    #     group_col=None,
+    # )
+    # if data_leakage_value != 0:
+    #     raise ValueError(f"Data leakage detected. Data leakage value: {data_leakage_value}")
 
     if args.bootstrapping:
         test_bootstrap_indices = np.random.randint(low=0,

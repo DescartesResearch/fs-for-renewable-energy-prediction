@@ -958,16 +958,19 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         :param cv: List of (train_idx, val_idx) tuples for cross-validation.
         :return: None. Everything is logged via self.logger.
         """
-        _iterations = [0] + [] if self.resume_at_iteration is None else [self.resume_at_iteration]
-        if self.curr_iteration in _iterations:
-            self._evaluate_cluster(X, y, current_features, cv, cluster_id="baseline")
-        else:
+        if len(self._selected_cluster_ids) > 0 and (self.logger.has_key(f"training/{self.curr_iteration - 1}/{self._selected_cluster_ids[-1]}") or self.logger.has_key(f"validation/{self.curr_iteration - 1}/{self._selected_cluster_ids[-1]}")):
+            self._console_log(
+                "Baseline results already exist from previous iteration, copying to current iteration.",
+                method_name="_create_baseline")
             # copy previous best results to current iteration (-> serves as baseline for current iteration)
             # no need to recompute / re-evaluate
             for s in ['training', 'validation']:
                 source = f"{s}/{self.curr_iteration - 1}/{self._selected_cluster_ids[-1]}"
                 dest = f"{s}/{self.curr_iteration}/baseline"
                 self._copy_results_and_objects(source, dest)
+        else:
+            self._console_log("Creating baseline results by evaluating all current features.", method_name="_create_baseline")
+            self._evaluate_cluster(X, y, current_features, cv, cluster_id="baseline")
 
     def _evaluate_feature(self, X: pd.DataFrame, y: np.ndarray, current_features: list[str],
                           cv: list[tuple[np.ndarray, np.ndarray]], feature_name: str) -> None:
