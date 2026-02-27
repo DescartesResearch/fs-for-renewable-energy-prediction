@@ -7,8 +7,19 @@ import shutil
 
 import scipy
 from lightning import seed_everything
-from sklearn.base import BaseEstimator, TransformerMixin, clone
-from sklearn.feature_selection import SelectKBest, f_regression, mutual_info_regression
+from sklearn.base import (
+    BaseEstimator,
+    TransformerMixin,
+    RegressorMixin,
+    ClassifierMixin,
+    clone,
+)
+from sklearn.feature_selection import (
+    SelectKBest,
+    f_regression,
+    mutual_info_regression,
+    SequentialFeatureSelector,
+)
 import numpy as np
 import pandas as pd
 import random
@@ -35,62 +46,79 @@ def get_feature_importance(X: pd.DataFrame, y, automl_settings: dict) -> np.ndar
     """
     automl = get_automl_with_registered_models(models_to_register=["rf"])
     automl_settings = automl_settings.copy()
-    automl_settings['estimator_list'] = ["rf"]
-    automl_settings['retrain_full'] = True
-    automl.fit(X,
-               y,
-               **automl_settings)
+    automl_settings["estimator_list"] = ["rf"]
+    automl_settings["retrain_full"] = True
+    automl.fit(X, y, **automl_settings)
     rf_fi_model = automl.model.estimator
-    if 'feature_importances_' not in dir(rf_fi_model):
-        raise ValueError("The selected estimator does not have feature_importances_ attribute.")
+    if "feature_importances_" not in dir(rf_fi_model):
+        raise ValueError(
+            "The selected estimator does not have feature_importances_ attribute."
+        )
     feature_importances = rf_fi_model.feature_importances_
     return feature_importances
 
 
-def get_feature_selector(logger: FSLogger,
-                         config: dict) -> BaseEstimator:
+def get_feature_selector(
+    logger: FSLogger, config: dict
+) -> BaseEstimator | TransformerMixin | RegressorMixin | ClassifierMixin:
     """
     Instantiates a scikit-learn compatible feature selector based on the provided configuration.
     :param logger: A logger instance for collecting logs, metrics and artifacts during feature selection.
     :param config: Configuration dictionary containing feature selection parameters. Must include 'fs_method' key.
     :return: Scikit-learn compatible feature selector instance.
     """
-    if config['fs_method'] == 'CSFS':
+    if config["fs_method"] == "CSFS":
         return ClusterSequentialFeatureSelector(
-            estimator_name=config['estimator_name'],
-            fixed_features=config['fixed_features'],
-            direction=config['direction'],
-            metrics=config['metrics'],
-            aggregation_mode=config['aggregation_mode'],
-            task=config['task'],
+            estimator_name=config["estimator_name"],
+            fixed_features=config["fixed_features"],
+            direction=config["direction"],
+            metrics=config["metrics"],
+            aggregation_mode=config["aggregation_mode"],
+            task=config["task"],
             # cv=cv,
-            val_ratio=config['val_ratio'],
-            gap=config['gap'],
-            datetimes=config['datetimes'],
+            val_ratio=config["val_ratio"],
+            gap=config["gap"],
+            datetimes=config["datetimes"],
             bootstrap_sample_size=config["bootstrap_sample_size"],
-            n_features_to_select=config['n_features_to_select'],
-            verbose=config['verbose'],
-            hpo_mode=config['hpo_mode'],
-            automl_settings=config['automl_settings'],
-            automl_ws_settings=config['automl_ws_settings'],
-            automl_log_dir=config['automl_log_dir'],
+            n_features_to_select=config["n_features_to_select"],
+            verbose=config["verbose"],
+            hpo_mode=config["hpo_mode"],
+            automl_settings=config["automl_settings"],
+            automl_ws_settings=config["automl_ws_settings"],
+            automl_log_dir=config["automl_log_dir"],
             logger=logger,
-            warm_starts=config['warm_starts'],
-            random_seed=config['random_seed'],
-            scoring=config['scoring'],
-            fast_mode=config['fast_mode'],
-            early_stopping=config['early_stopping'],
-            clustering_config=config['clustering_config'],
-            resume_at_iteration=config['resume_at_iteration'],
+            warm_starts=config["warm_starts"],
+            random_seed=config["random_seed"],
+            scoring=config["scoring"],
+            fast_mode=config["fast_mode"],
+            early_stopping=config["early_stopping"],
+            clustering_config=config["clustering_config"],
+            resume_at_iteration=config["resume_at_iteration"],
         )
-    elif config['fs_method'] in ['f_value', 'mutual_info', 'RF_FI']:
-        if config['fs_method'] in ['f_value', 'mutual_info']:
-            score_func = f_regression if config['fs_method'] == 'f_value' else mutual_info_regression
+    elif config["fs_method"] in ["f_value", "mutual_info", "RF_FI"]:
+        if config["fs_method"] in ["f_value", "mutual_info"]:
+            score_func = (
+                f_regression
+                if config["fs_method"] == "f_value"
+                else mutual_info_regression
+            )
         else:
-            score_func = lambda X, y: get_feature_importance(X, y, automl_settings=config['automl_settings'])
-        return SelectKBest(score_func=score_func, k=config['n_features_to_select'])
-    elif config['fs_method'] == 'SFS':
-        raise NotImplementedError("SFS not yet implemented.")
+            score_func = lambda X, y: get_feature_importance(
+                X, y, automl_settings=config["automl_settings"]
+            )
+        return SelectKBest(score_func=score_func, k=config["n_features_to_select"])
+    elif config["fs_method"] == "SFS":
+        return SequentialFeatureSelector(
+            estimator=get_sklearn_estim(
+                estimator_name=config["estimator_name"],
+                task=config["task"],
+                best_flaml_config=None,
+            ),
+            n_features_to_select=config["n_features_to_select"],
+            direction=config["direction"],
+            # scoring=config["scoring"], # TODO
+            n_jobs=config["n_jobs"]
+        )
     else:
         raise NotImplementedError(f"fs_method {config['fs_method']} not implemented")
 
@@ -103,12 +131,16 @@ def dict_k_fold_lists_to_dict(d: dict, k: int) -> dict:
     return unflatten_dict(flat_d)
 
 
-def create_feature_clusters(X: pd.DataFrame,
-                            clustering_method: Literal['singletons', 'random', 'correlation', 'feature_importance'],
-                            corr_threshold: float = 0.9,
-                            y: Optional[np.ndarray] = None,
-                            group_size: Optional[int] = None,
-                            automl_settings: Optional[dict] = None) -> dict[int, list[str]]:
+def create_feature_clusters(
+    X: pd.DataFrame,
+    clustering_method: Literal[
+        "singletons", "random", "correlation", "feature_importance"
+    ],
+    corr_threshold: float = 0.9,
+    y: Optional[np.ndarray] = None,
+    group_size: Optional[int] = None,
+    automl_settings: Optional[dict] = None,
+) -> dict[int, list[str]]:
     """
     Performs feature clustering on the columns ℱ in the provided dataframe.
     :param X: Pandas DataFrame with shape (num_samples, num_features)
@@ -119,28 +151,36 @@ def create_feature_clusters(X: pd.DataFrame,
     :param automl_settings: AutoML settings for 'feature_importance' clustering method.
     :return: Dictionary mapping cluster IDs to lists of feature names.
     """
-    if clustering_method in ['random', 'feature_importance'] and group_size is None:
-        raise ValueError(f"random_group_size must be provided if clustering_method == '{clustering_method}'.")
-    if clustering_method in ['singletons', 'correlation'] and group_size is not None:
-        raise ValueError(f"random_group_size must NOT be provided if clustering_method == '{clustering_method}'.")
-    if clustering_method == 'feature_importance':
+    if clustering_method in ["random", "feature_importance"] and group_size is None:
+        raise ValueError(
+            f"random_group_size must be provided if clustering_method == '{clustering_method}'."
+        )
+    if clustering_method in ["singletons", "correlation"] and group_size is not None:
+        raise ValueError(
+            f"random_group_size must NOT be provided if clustering_method == '{clustering_method}'."
+        )
+    if clustering_method == "feature_importance":
         if automl_settings is None:
-            raise ValueError("automl_settings must be provided if clustering_method == 'feature_importance'.")
+            raise ValueError(
+                "automl_settings must be provided if clustering_method == 'feature_importance'."
+            )
         if y is None:
-            raise ValueError("y must be provided if clustering_method == 'feature_importance'.")
+            raise ValueError(
+                "y must be provided if clustering_method == 'feature_importance'."
+            )
 
     features = X.columns.tolist()
 
-    if clustering_method == 'singletons':
+    if clustering_method == "singletons":
         clusters = [[feature] for feature in features]
         clusters = dict(enumerate(clusters))
-    elif clustering_method == 'correlation':
+    elif clustering_method == "correlation":
         # Compute correlation matrix and distance
         corr = (_df := DataFrameProcessor.filter_columns(features)(X)).corr().abs()
         distance = 1 - corr
 
         # Manually set distance of sin/cos of cyclical_encoding features to 0, so that they will belong to the same cluster
-        sin_feature_names = list(filter(lambda x: 'sin' in x, features))
+        sin_feature_names = list(filter(lambda x: "sin" in x, features))
         for sin_feature_name in sin_feature_names:
             sin_feature_id = features.index(sin_feature_name)
             cos_feature_id = features.index(sin_feature_name.replace("sin", "cos"))
@@ -151,38 +191,51 @@ def create_feature_clusters(X: pd.DataFrame,
         # remove numerical noise (very small negative values)
         distance = np.maximum(distance, 0)
 
-        linkage_matrix = linkage(squareform(distance), method='median')
+        linkage_matrix = linkage(squareform(distance), method="median")
 
         # Cut tree at desired threshold (e.g., 0.9)
-        cluster_ids: np.ndarray = fcluster(linkage_matrix, t=1 - corr_threshold, criterion='distance')  # 0.1 = 1 - 0.9
+        cluster_ids: np.ndarray = fcluster(
+            linkage_matrix, t=1 - corr_threshold, criterion="distance"
+        )  # 0.1 = 1 - 0.9
         feature_clusters = {}
         for feature, cluster_id in zip(corr.columns, cluster_ids):
             feature_clusters.setdefault(cluster_id, []).append(feature)
 
         clusters = list(feature_clusters.values())
         clusters = dict(enumerate(clusters))
-    elif clustering_method in ['random', 'feature_importance']:
+    elif clustering_method in ["random", "feature_importance"]:
         _features = features.copy()
-        if clustering_method == 'feature_importance':
+        if clustering_method == "feature_importance":
             logging.info("Computing feature importances for clustering:")
-            feature_importances = get_feature_importance(X, y, automl_settings=automl_settings)
+            feature_importances = get_feature_importance(
+                X, y, automl_settings=automl_settings
+            )
             # order features by importance
             feature_importance_tuples = list(zip(_features, feature_importances))
-            feature_importance_tuples.sort(key=lambda x: x[1], reverse=True)  # descending, most important first
-            logging.info("\n".join(f"{t[0]}: {t[1]}" for t in feature_importance_tuples))
-            _features = [t[0] for t in feature_importance_tuples]  # extract ordered feature names
-        elif clustering_method == 'random':
+            feature_importance_tuples.sort(
+                key=lambda x: x[1], reverse=True
+            )  # descending, most important first
+            logging.info(
+                "\n".join(f"{t[0]}: {t[1]}" for t in feature_importance_tuples)
+            )
+            _features = [
+                t[0] for t in feature_importance_tuples
+            ]  # extract ordered feature names
+        elif clustering_method == "random":
             np.random.shuffle(_features)
         else:
             raise ValueError(
-                f"create_feature_clusters not correctly implemented for clustering_method = '{clustering_method}'")
+                f"create_feature_clusters not correctly implemented for clustering_method = '{clustering_method}'"
+            )
         clusters = defaultdict(list)
         space_left = np.full(len(_features), fill_value=group_size)
-        sin_feature_names = list(filter(lambda x: 'sin' in x, _features))
-        cos_feature_names = list(filter(lambda x: 'cos' in x, _features))
+        sin_feature_names = list(filter(lambda x: "sin" in x, _features))
+        cos_feature_names = list(filter(lambda x: "cos" in x, _features))
         while len(_features) > 0:
             curr_feature = _features.pop()
-            if (curr_feature in sin_feature_names) or (curr_feature in cos_feature_names):
+            if (curr_feature in sin_feature_names) or (
+                curr_feature in cos_feature_names
+            ):
                 if curr_feature in sin_feature_names:
                     sin_feature = curr_feature
                     cos_feature = sin_feature.replace("sin", "cos")
@@ -205,7 +258,9 @@ def create_feature_clusters(X: pd.DataFrame,
     clustered_features = [f for group in clusters.values() for f in group]
     if set(clustered_features) != set(features):
         missing_features = set(features) - set(clustered_features)
-        raise RuntimeError(f"The following features are missing in the clusters: {missing_features}")
+        raise RuntimeError(
+            f"The following features are missing in the clusters: {missing_features}"
+        )
     logging.info(f"Clustered {len(features)} features into {len(clusters)} clusters")
     return clusters
 
@@ -220,7 +275,7 @@ def mean_confidence_interval(data, confidence=0.95):
     a = 1.0 * np.array(data)
     n = len(a)
     m, se = np.mean(a), scipy.stats.sem(a)
-    h = se * scipy.stats.t.ppf((1 + confidence) / 2., n - 1)
+    h = se * scipy.stats.t.ppf((1 + confidence) / 2.0, n - 1)
     return m, m - h, m + h
 
 
@@ -229,36 +284,37 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
     Cluster-based Sequential Feature Selector (CSFS) implementation.
     """
 
-    def __init__(self,
-                 estimator_name: str,
-                 fixed_features: list,
-                 metrics: dict,
-                 scoring: str,
-                 val_ratio: float,
-                 gap: pd.Timedelta,
-                 datetimes: pd.Series,
-                 clustering_config: dict,
-                 logger: FSLogger,
-                 task: Literal['classification', 'regression'],
-                 direction: str = 'backward',
-                 cv: Optional[list[tuple] | Any] = None,
-                 bootstrap_sample_size: Optional[int] = None,
-                 n_features_to_select: int = 1,
-                 verbose=1,
-                 aggregation_mode: Literal['median', 'mean', 'min', 'max'] = 'median',
-                 hpo_mode: Literal['off', 'per_feature_set', 'per_iteration'] = 'off',
-                 automl_settings: dict = None,
-                 automl_ws_settings: dict = None,
-                 warm_starts: bool = True,
-                 fast_mode: bool = True,
-                 early_stopping: bool = False,
-                 tolerance_margin: float = 0.0,
-                 beta: float = 0.05,
-                 correlation_threshold: float = 0.9,
-                 random_seed: Optional[int] = None,
-                 automl_log_dir: Optional[Path] = None,
-                 resume_at_iteration: Optional[int] = None,
-                 ):
+    def __init__(
+        self,
+        estimator_name: str,
+        fixed_features: list,
+        metrics: dict,
+        scoring: str,
+        val_ratio: float,
+        gap: pd.Timedelta,
+        datetimes: pd.Series,
+        clustering_config: dict,
+        logger: FSLogger,
+        task: Literal["classification", "regression"],
+        direction: str = "backward",
+        cv: Optional[list[tuple] | Any] = None,
+        bootstrap_sample_size: Optional[int] = None,
+        n_features_to_select: int = 1,
+        verbose=1,
+        aggregation_mode: Literal["median", "mean", "min", "max"] = "median",
+        hpo_mode: Literal["off", "per_feature_set", "per_iteration"] = "off",
+        automl_settings: dict = None,
+        automl_ws_settings: dict = None,
+        warm_starts: bool = True,
+        fast_mode: bool = True,
+        early_stopping: bool = False,
+        tolerance_margin: float = 0.0,
+        beta: float = 0.05,
+        correlation_threshold: float = 0.9,
+        random_seed: Optional[int] = None,
+        automl_log_dir: Optional[Path] = None,
+        resume_at_iteration: Optional[int] = None,
+    ):
         """
         Extension of Sequential Feature Selection based on feature clusters.
 
@@ -338,19 +394,25 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         # self.logging_prefix = logging_prefix if logging_prefix == '' or logging_prefix[
         #     -1] == '/' else logging_prefix + '/'
 
-        if direction not in ['backward', 'forward']:
+        if direction not in ["backward", "forward"]:
             raise ValueError("direction must be 'backward' or 'forward'")
 
-        if aggregation_mode not in ['median', 'avg', 'min', 'max']:
+        if aggregation_mode not in ["median", "avg", "min", "max"]:
             raise ValueError("ranking must be 'median', 'avg', 'min', or 'max'")
 
-        if self.hpo_mode != 'off' and self.automl_settings is None:
+        if self.hpo_mode != "off" and self.automl_settings is None:
             raise ValueError("automl_config must be provided if hpo is turned on.")
 
-        if warm_starts and self.automl_ws_settings is None:
-            raise ValueError("automl_ws_settings must be provided if warm_starts is turned on.")
+        if self.warm_starts:
+            if self.automl_ws_settings is None:
+                raise ValueError(
+                    "automl_ws_settings must be provided if warm_starts is turned on."
+                )
+        
             self.automl_ws_settings = self.automl_settings.copy()
-            self.automl_ws_settings.update(automl_warmstart_settings if automl_warmstart_settings is not None else {})
+            self.automl_ws_settings.update(
+                automl_ws_settings
+            )
 
         if self.cv is not None and self.val_ratio is not None:
             raise ValueError("Either cv or val_ratio can be provided, not both.")
@@ -381,27 +443,37 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         self.cv = self._prepare_cv(X, y)
         self._console_log("Creating feature clusters for CSFS.")
         _t0_create_feature_clusters = time.perf_counter()
-        self.clusters = create_feature_clusters(X=X,
-                                                y=y,
-                                                automl_settings=self.automl_settings,
-                                                corr_threshold=self.correlation_threshold,
-                                                **self.clustering_config)
+        self.clusters = create_feature_clusters(
+            X=X,
+            y=y,
+            automl_settings=self.automl_settings,
+            corr_threshold=self.correlation_threshold,
+            **self.clustering_config,
+        )
         _t1_create_feature_clusters = time.perf_counter()
-        feature_clustering_duration = _t1_create_feature_clusters - _t0_create_feature_clusters
+        feature_clustering_duration = (
+            _t1_create_feature_clusters - _t0_create_feature_clusters
+        )
 
         self._console_log(
             f"Finished feature clustering in {feature_clustering_duration} s. Using the following {len(self.clusters)} clusters for CSFS:\n"
             + "\n".join(
-                f"Cluster {i}: {cluster}" for i, cluster in self.clusters.items()))
+                f"Cluster {i}: {cluster}" for i, cluster in self.clusters.items()
+            )
+        )
 
         X, y = self._validate_clusters(X, y)
 
         if self.bootstrap_sample_size is not None:
             logging.info("Generating bootstrap indices for test set bootstrapping.")
-            self.bootstrap_indices = {fold_id: np.random.randint(low=0, high=len(train_val_idx[1]),
-                                                                 size=(self.bootstrap_sample_size,
-                                                                       len(train_val_idx[1]))) for
-                                      fold_id, train_val_idx in enumerate(self.cv)}
+            self.bootstrap_indices = {
+                fold_id: np.random.randint(
+                    low=0,
+                    high=len(train_val_idx[1]),
+                    size=(self.bootstrap_sample_size, len(train_val_idx[1])),
+                )
+                for fold_id, train_val_idx in enumerate(self.cv)
+            }
         else:
             self.bootstrap_indices = None
 
@@ -411,64 +483,81 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
             self._restore_state()
         else:
             self.logger.save_object("initial_clusters", self.clusters)
-            self.logger.log_metrics({
-                "feature_clustering_duration": feature_clustering_duration
-            })
+            self.logger.log_metrics(
+                {"feature_clustering_duration": feature_clustering_duration}
+            )
 
-        while (not self._has_finished()):
+        while not self._has_finished():
             self.curr_iteration += 1
             logging.info(f"Starting iteration {self.curr_iteration + 1}")
-            logging.info(f"Current selected feature count: {self._currently_selected_features()}")
+            logging.info(
+                f"Current selected feature count: {self._currently_selected_features()}"
+            )
             logging.info(f"Desired feature count: {self.n_features_to_select}")
 
-            current_features = self._get_current_features(clusters_under_test=self._get_cluster_queue(),
-                                                          curr_selected_cluster_ids=self._selected_cluster_ids,
-                                                          curr_tested_cluster_id=None,
-                                                          curr_tested_feature=None)
+            current_features = self._get_current_features(
+                clusters_under_test=self._get_cluster_queue(),
+                curr_selected_cluster_ids=self._selected_cluster_ids,
+                curr_tested_cluster_id=None,
+                curr_tested_feature=None,
+            )
 
             if self.warm_starts:
                 self._run_hpo_warmup(X, y, current_features, self.cv)
 
-            if self.hpo_mode == 'per_iteration':
+            if self.hpo_mode == "per_iteration":
                 self._run_hpo(X, y, current_features, self.cv)
 
             self._create_baseline(X, y, current_features, self.cv)
 
             selected_cluster_id = None
-            for j, (cluster_id, cluster) in enumerate(self._get_cluster_queue().items()):
+            for j, (cluster_id, cluster) in enumerate(
+                self._get_cluster_queue().items()
+            ):
                 self._console_log(
-                    f"Evaluating cluster {j + 1}/{len(self._get_cluster_queue())}: {cluster}")
+                    f"Evaluating cluster {j + 1}/{len(self._get_cluster_queue())}: {cluster}"
+                )
                 # cluster: Feature cluster to be tested in this loop.
                 # cluster_id: ID of the cluster being tested.
 
-                current_features = self._get_current_features(clusters_under_test=self._get_cluster_queue(),
-                                                              curr_selected_cluster_ids=self._selected_cluster_ids,
-                                                              curr_tested_cluster_id=cluster_id,
-                                                              curr_tested_feature=None)
-                self._console_log(
-                    f"Current features: {current_features}"
+                current_features = self._get_current_features(
+                    clusters_under_test=self._get_cluster_queue(),
+                    curr_selected_cluster_ids=self._selected_cluster_ids,
+                    curr_tested_cluster_id=cluster_id,
+                    curr_tested_feature=None,
                 )
+                self._console_log(f"Current features: {current_features}")
 
                 if len(current_features) == 0:
                     if j > 0:
                         raise RuntimeError(
-                            "No features would remain after removing cluster, but not the first (and only, as expected) cluster.")
+                            "No features would remain after removing cluster, but not the first (and only, as expected) cluster."
+                        )
                     self._console_log(
-                        f"Skipping evaluation of cluster {cluster_id} because no features would remain.")
+                        f"Skipping evaluation of cluster {cluster_id} because no features would remain."
+                    )
                     continue
 
                 t0 = time.perf_counter()
                 self._evaluate_cluster(X, y, current_features, self.cv, cluster_id)
                 t1 = time.perf_counter()
-                self._console_log(f"Cluster {cluster_id} evaluated in {t1 - t0:.2f} seconds.")
+                self._console_log(
+                    f"Cluster {cluster_id} evaluated in {t1 - t0:.2f} seconds."
+                )
 
-                if self.fast_stop and not self._would_violate_selection_size(cluster_id) and self._cluster_non_inferior(
-                        cluster_id):
+                if (
+                    self.fast_stop
+                    and not self._would_violate_selection_size(cluster_id)
+                    and self._cluster_non_inferior(cluster_id)
+                ):
                     selected_cluster_id = cluster_id
                     self._console_log(
-                        f"Fast mode: Cluster {cluster_id} passed non-inferiority test. Skipping evaluation of other clusters.")
+                        f"Fast mode: Cluster {cluster_id} passed non-inferiority test. Skipping evaluation of other clusters."
+                    )
                     self.logger.log_metrics({"fast_stop_cluster_id": cluster_id})
-                    self.logger.log_metrics({"fast_stop_iteration": self.curr_iteration})
+                    self.logger.log_metrics(
+                        {"fast_stop_iteration": self.curr_iteration}
+                    )
                     self.logger.log_metrics({"fast_stop_evaluated_clusters": j + 1})
                     break
 
@@ -478,13 +567,19 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
                     if self._would_violate_selection_size(cluster_id):
                         continue
                     if self._cluster_non_inferior(cluster_id):
-                        self._console_log(f"Cluster {cluster_id} passed non-inferiority test.")
+                        self._console_log(
+                            f"Cluster {cluster_id} passed non-inferiority test."
+                        )
                         selected_cluster_id = cluster_id
                         break
 
             if selected_cluster_id is None:
-                self._console_log(f"No cluster was non-inferior, entering feature-level testing.")
-                self.logger.log_metrics({"feature_level_iteration": self.curr_iteration})
+                self._console_log(
+                    f"No cluster was non-inferior, entering feature-level testing."
+                )
+                self.logger.log_metrics(
+                    {"feature_level_iteration": self.curr_iteration}
+                )
                 # No cluster was non-inferior, enter feature-level testing
                 selected_feature = None
                 all_features = dict()
@@ -497,18 +592,26 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
                         continue
                     for feature in cluster:
                         all_features[feature] = cluster_id
-                        current_features = self._get_current_features(clusters_under_test=self._get_cluster_queue(),
-                                                                      curr_selected_cluster_ids=self._selected_cluster_ids,
-                                                                      curr_tested_feature=feature,
-                                                                      curr_tested_cluster_id=None)
-                        self._evaluate_feature(X, y, current_features, self.cv, feature_name=feature)
+                        current_features = self._get_current_features(
+                            clusters_under_test=self._get_cluster_queue(),
+                            curr_selected_cluster_ids=self._selected_cluster_ids,
+                            curr_tested_feature=feature,
+                            curr_tested_cluster_id=None,
+                        )
+                        self._evaluate_feature(
+                            X, y, current_features, self.cv, feature_name=feature
+                        )
                         evaluated_features += 1
                         if self._feature_non_inferior(feature):
                             # First feature that is non-inferior is selected
-                            self._console_log(f"Feature '{feature}' passed non-inferiority test.")
+                            self._console_log(
+                                f"Feature '{feature}' passed non-inferiority test."
+                            )
                             selected_feature = feature
                             break
-                self.logger.log_metrics({"feature_level_evaluated_features": evaluated_features})
+                self.logger.log_metrics(
+                    {"feature_level_evaluated_features": evaluated_features}
+                )
                 if selected_feature is None and self.early_stopping:
                     # No feature was non-inferior, stop if early stopping is enabled
                     self._console_log("CSFS procedure stopped due to early stopping.")
@@ -517,10 +620,18 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
                     selected_feature_or_cluster = selected_feature
                 else:
                     # Otherwise, select the best feature or cluster
-                    self._console_log("No feature was non-inferior, selecting best feature or cluster.")
-                    self.logger.log_metrics({"feature_level_none_non-inferior_iteration": self.curr_iteration})
+                    self._console_log(
+                        "No feature was non-inferior, selecting best feature or cluster."
+                    )
+                    self.logger.log_metrics(
+                        {
+                            "feature_level_none_non-inferior_iteration": self.curr_iteration
+                        }
+                    )
                     selected_feature_or_cluster = self._get_best_cluster(
-                        list(all_features.keys()) + list(self._get_cluster_queue().keys()))
+                        list(all_features.keys())
+                        + list(self._get_cluster_queue().keys())
+                    )
 
                 # selected_feature_or_cluster is either a cluster_id (int) or a feature_name (str)
                 if selected_feature_or_cluster in self._get_cluster_queue().keys():
@@ -530,21 +641,26 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
                     # It's a feature name, create a new cluster with just this feature
                     selected_cluster_id = self._add_cluster(
                         origin_cluster_id=all_features[selected_feature_or_cluster],
-                        feature_name=selected_feature_or_cluster
+                        feature_name=selected_feature_or_cluster,
                     )
 
                     self._console_log(
-                        f"Added new cluster (id={selected_cluster_id}): [{selected_feature_or_cluster}].")
+                        f"Added new cluster (id={selected_cluster_id}): [{selected_feature_or_cluster}]."
+                    )
 
             if selected_cluster_id is None:
-                raise RuntimeError("No cluster selected for removal/addition, but procedure not stopped.")
+                raise RuntimeError(
+                    "No cluster selected for removal/addition, but procedure not stopped."
+                )
             self._selected_cluster_ids.append(selected_cluster_id)
 
             self._console_log(f"Added/removed cluster with id={selected_cluster_id}")
-            self.logger.log_metrics({'selected_cluster_id': selected_cluster_id}, step=self.curr_iteration)
+            self.logger.log_metrics(
+                {"selected_cluster_id": selected_cluster_id}, step=self.curr_iteration
+            )
 
         logging.info(f"CSFS procedure done!")
-        self.logger.save_object('final_clusters', self.clusters)
+        self.logger.save_object("final_clusters", self.clusters)
 
         self._fit_successful = True
 
@@ -562,48 +678,85 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         directories_to_delete = [self.logger.log_dir / "testing"]
         for typ in ["training", "validation", "warmup", "automl"]:
             directories_to_delete.extend(
-                [(self.logger.log_dir / d) for d in (self.logger.log_dir / typ).iterdir() if
-                 (self.logger.log_dir / d).is_dir() and int(d.name) >= self.resume_at_iteration]
+                [
+                    (self.logger.log_dir / d)
+                    for d in (self.logger.log_dir / typ).iterdir()
+                    if (self.logger.log_dir / d).is_dir()
+                    and int(d.name) >= self.resume_at_iteration
+                ]
             )
 
         # Step 2: Validate clustering
         original_clusters = self.logger.fetch_object("initial_clusters")
         if original_clusters != self.clusters:
-            raise RuntimeError("The clusters have changed since the initial fit. Cannot resume.")
+            raise RuntimeError(
+                "The clusters have changed since the initial fit. Cannot resume."
+            )
 
         # Step 3: Restore iteration and selected clusters
         self.curr_iteration = self.resume_at_iteration - 1
-        self._selected_cluster_ids = list(self.logger.fetch_values("selected_cluster_id"))
+        self._selected_cluster_ids = list(
+            self.logger.fetch_values("selected_cluster_id")
+        )
         directories_to_delete.append(self.logger.log_dir / "selected_cluster_id.npy")
-        self._selected_cluster_ids = self._selected_cluster_ids[:self.resume_at_iteration]
+        self._selected_cluster_ids = self._selected_cluster_ids[
+            : self.resume_at_iteration
+        ]
         for iteration, cluster_id in enumerate(self._selected_cluster_ids):
-            self.logger.log_metrics({'selected_cluster_id': cluster_id}, step=iteration)
+            self.logger.log_metrics({"selected_cluster_id": cluster_id}, step=iteration)
 
         # Step 4: Get remaining information for logger
-        for k in ["fast_stop_iteration", "fast_stop_cluster_id", "feature_level_iteration",
-                  "feature_level_none_non-inferior_iteration", "feature_level_evaluated_features",
-                  "fast_stop_evaluated_clusters"]:
+        for k in [
+            "fast_stop_iteration",
+            "fast_stop_cluster_id",
+            "feature_level_iteration",
+            "feature_level_none_non-inferior_iteration",
+            "feature_level_evaluated_features",
+            "fast_stop_evaluated_clusters",
+        ]:
             values = self.logger.fetch_values(k)
             if values is None:
                 continue
             if not hasattr(values, "__len__"):
                 values = [values]
             if k == "fast_stop_cluster_id":
-                for cluster_id in [v for v in values if v in self._selected_cluster_ids]:
+                for cluster_id in [
+                    v for v in values if v in self._selected_cluster_ids
+                ]:
                     self.logger.log_metrics({k: cluster_id})
-            elif k in ["fast_stop_iteration", "feature_level_iteration", "feature_level_none_non-inferior_iteration"]:
+            elif k in [
+                "fast_stop_iteration",
+                "feature_level_iteration",
+                "feature_level_none_non-inferior_iteration",
+            ]:
                 for iteration in [v for v in values if v < self.resume_at_iteration]:
                     self.logger.log_metrics({k: iteration})
             elif k == "fast_stop_evaluated_clusters":
                 fast_stop_iterations = self.logger.fetch_values("fast_stop_iteration")
-                number_of_fast_stop_iterations = 0 if fast_stop_iterations is None else (
-                    1 if not hasattr(fast_stop_iterations, "__len__") else len(fast_stop_iterations))
+                number_of_fast_stop_iterations = (
+                    0
+                    if fast_stop_iterations is None
+                    else (
+                        1
+                        if not hasattr(fast_stop_iterations, "__len__")
+                        else len(fast_stop_iterations)
+                    )
+                )
                 for n_clusters in values[:number_of_fast_stop_iterations]:
                     self.logger.log_metrics({k: n_clusters})
             elif k == "feature_level_evaluated_features":
-                feature_level_iterations = self.logger.fetch_values("feature_level_iteration")
-                number_of_feature_level_iterations = 0 if feature_level_iterations is None else (
-                    1 if not hasattr(feature_level_iterations, "__len__") else len(feature_level_iterations))
+                feature_level_iterations = self.logger.fetch_values(
+                    "feature_level_iteration"
+                )
+                number_of_feature_level_iterations = (
+                    0
+                    if feature_level_iterations is None
+                    else (
+                        1
+                        if not hasattr(feature_level_iterations, "__len__")
+                        else len(feature_level_iterations)
+                    )
+                )
                 for n_features in values[:number_of_feature_level_iterations]:
                     self.logger.log_metrics({k: n_features})
             else:
@@ -626,8 +779,15 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
             self.clusters[cluster_id] = new_cluster
 
         # Step 6: Remaining data to delete
-        for d in ["test_idx.npy", "train_val_idx.npy", "test_bootstrap_indices.npy", "status.txt",
-                  "feature_names_out.pkl", "fs_runtime.npy", "final_clusters.pkl", ]:
+        for d in [
+            "test_idx.npy",
+            "train_val_idx.npy",
+            "test_bootstrap_indices.npy",
+            "status.txt",
+            "feature_names_out.pkl",
+            "fs_runtime.npy",
+            "final_clusters.pkl",
+        ]:
             directories_to_delete.append(self.logger.log_dir / d)
 
         # Delete directories/files
@@ -661,7 +821,8 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
 
         if len(features) - len(self.fixed_features) < self.n_features_to_select:
             raise ValueError(
-                "n_features_to_select is larger than the number of available features after accounting for fixed_features.")
+                "n_features_to_select is larger than the number of available features after accounting for fixed_features."
+            )
 
         return X, y
 
@@ -685,11 +846,15 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         else:
             raise ValueError(
                 "The columns in X must be a superset of the expected features. The following are missing: {}".format(
-                    set(expected_features) - set(X.columns)))
+                    set(expected_features) - set(X.columns)
+                )
+            )
 
         return X, y
 
-    def _prepare_cv(self, X: pd.DataFrame, y: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]]:
+    def _prepare_cv(
+        self, X: pd.DataFrame, y: np.ndarray
+    ) -> list[tuple[np.ndarray, np.ndarray]]:
         """
         Prepares the data splits for cross-validation.
         :param X:
@@ -719,8 +884,13 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         """
         return len(self.get_support()) - len(self.fixed_features)
 
-    def _run_hpo_warmup(self, X: pd.DataFrame, y: np.ndarray, current_features: list[str],
-                        cv: list[tuple[np.ndarray, np.ndarray]]) -> None:
+    def _run_hpo_warmup(
+        self,
+        X: pd.DataFrame,
+        y: np.ndarray,
+        current_features: list[str],
+        cv: list[tuple[np.ndarray, np.ndarray]],
+    ) -> None:
         """
         Runs warm-up hyperparameter optimization to gather starting points for the current iteration.
         :param X: Pandas DataFrame with shape (num_samples, num_features)
@@ -734,41 +904,65 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
             # print(
             #     f"Memory usage before fold {fold_id}: {psutil.Process(os.getpid()).memory_info().rss / 1e6:.2f} MB")
             self._console_log(
-                "Starting WarmUp", fold_id=fold_id, method_name="_run_hpo_warmup")
-            automl_ws = get_automl_with_registered_models(self.automl_ws_settings['estimator_list'])
+                "Starting WarmUp", fold_id=fold_id, method_name="_run_hpo_warmup"
+            )
+            automl_ws = get_automl_with_registered_models(
+                self.automl_ws_settings["estimator_list"]
+            )
             warmup_start_time = time.perf_counter()
-            automl_ws.fit(X.iloc[train_idx].loc[:, current_features],
-                          y[train_idx],
-                          **self.automl_ws_settings,
-                          log_file_name=self._get_automl_logdir(fold_id, filename="automl_warmup"), )
+            automl_ws.fit(
+                X.iloc[train_idx].loc[:, current_features],
+                y[train_idx],
+                **self.automl_ws_settings,
+                log_file_name=self._get_automl_logdir(
+                    fold_id, filename="automl_warmup"
+                ),
+            )
             warmup_end_time = time.perf_counter()
             warmup_duration = warmup_end_time - warmup_start_time
             n_trials = automl_ws._search_states[self.estimator_name].total_iter
             curr_metrics = {
                 "n_trials": n_trials,
-                "duration": warmup_end_time - warmup_start_time
+                "duration": warmup_end_time - warmup_start_time,
             }
 
             logs_parent_key = f"warmup/{self.curr_iteration}/{fold_id}"
-            self.logger.save_object(f"{logs_parent_key}/starting_points", automl_ws.best_config_per_estimator)
-            self.logger.save_object(f"{logs_parent_key}/best_config", automl_ws.best_config)
-            self.logger.log_metrics(flatten_dict(curr_metrics, parent_key=logs_parent_key))
+            self.logger.save_object(
+                f"{logs_parent_key}/starting_points",
+                automl_ws.best_config_per_estimator,
+            )
+            self.logger.save_object(
+                f"{logs_parent_key}/best_config", automl_ws.best_config
+            )
+            self.logger.log_metrics(
+                flatten_dict(curr_metrics, parent_key=logs_parent_key)
+            )
             self._console_log(
-                f"WarmUp done - {n_trials} Trials in {warmup_duration} seconds.", fold_id=fold_id,
-                method_name="_run_hpo_warmup")
+                f"WarmUp done - {n_trials} Trials in {warmup_duration} seconds.",
+                fold_id=fold_id,
+                method_name="_run_hpo_warmup",
+            )
 
-    def _console_log(self, msg: str,
-                     level: int = logging.INFO,
-                     fold_id: Optional[int] = None,
-                     method_name: Optional[str] = None):
+    def _console_log(
+        self,
+        msg: str,
+        level: int = logging.INFO,
+        fold_id: Optional[int] = None,
+        method_name: Optional[str] = None,
+    ):
         prefix = ""
         prefix += f"[{method_name}]" if method_name is not None else ""
         prefix += f"[Iteration {self.curr_iteration + 1}]"
         prefix += f"[Fold {fold_id + 1}]" if fold_id is not None else ""
         logging.log(level, f"{prefix} {msg}")
 
-    def _run_hpo(self, X: pd.DataFrame, y: np.ndarray, current_features: list[str],
-                 cv: list[tuple[np.ndarray, np.ndarray]]) -> None:
+    def _run_hpo(
+        self,
+        X: pd.DataFrame,
+        y: np.ndarray,
+        current_features: list[str],
+        cv: list[tuple[np.ndarray, np.ndarray]],
+    ) -> None:
         """
         Runs hyperparameter optimization for the current iteration. The optimal hyperparameters are saved via self.logger.
         :param X: Pandas DataFrame with shape (num_samples, num_features)
@@ -779,34 +973,51 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         """
         for fold_id, (train_idx, _) in enumerate(cv):
             self._console_log("Starting HPO", fold_id=fold_id, method_name="_run_hpo")
-            automl = get_automl_with_registered_models(self.automl_settings['estimator_list'])
+            automl = get_automl_with_registered_models(
+                self.automl_settings["estimator_list"]
+            )
             starting_points = self.logger.fetch_object(
-                f"warmup/{self.curr_iteration}/{fold_id}/starting_points")
+                f"warmup/{self.curr_iteration}/{fold_id}/starting_points"
+            )
             if starting_points is not None:
-                self._console_log("Using starting_points", fold_id=fold_id, method_name="_run_hpo")
+                self._console_log(
+                    "Using starting_points", fold_id=fold_id, method_name="_run_hpo"
+                )
             elif starting_points is None and self.warm_starts:
                 raise RuntimeError(
-                    f"Warm starts are enabled, but no starting points found under 'warmup/{self.curr_iteration}/{fold_id}/starting_points'")
+                    f"Warm starts are enabled, but no starting points found under 'warmup/{self.curr_iteration}/{fold_id}/starting_points'"
+                )
             hpo_start_time = time.perf_counter()
-            automl.fit(X.iloc[train_idx].loc[:, current_features], y[train_idx],
-                       **self.automl_settings,
-                       starting_points=starting_points,
-                       log_file_name=self._get_automl_logdir(fold_idx=fold_id, filename="automl_hpo"), )
+            automl.fit(
+                X.iloc[train_idx].loc[:, current_features],
+                y[train_idx],
+                **self.automl_settings,
+                starting_points=starting_points,
+                log_file_name=self._get_automl_logdir(
+                    fold_idx=fold_id, filename="automl_hpo"
+                ),
+            )
             hpo_end_time = time.perf_counter()
             hpo_duration = hpo_end_time - hpo_start_time
             n_trials = automl._search_states[self.estimator_name].total_iter
 
-            curr_metrics = {
-                "n_trials": n_trials,
-                "duration": hpo_duration
-            }
-            self._console_log(f"HPO done - {n_trials} Trials in {hpo_duration} seconds.", fold_id=fold_id,
-                              method_name="_run_hpo")
+            curr_metrics = {"n_trials": n_trials, "duration": hpo_duration}
+            self._console_log(
+                f"HPO done - {n_trials} Trials in {hpo_duration} seconds.",
+                fold_id=fold_id,
+                method_name="_run_hpo",
+            )
             logs_parent_key = f"hpo/{self.curr_iteration}/{fold_id}"
-            self.logger.log_metrics(flatten_dict(curr_metrics, parent_key=logs_parent_key))
-            self.logger.save_object(f"hpo/{self.curr_iteration}/{fold_id}/best_config",
-                                    automl.best_config)
-            self.logger.save_object(f"hpo/{self.curr_iteration}/{fold_id}/estimator", clone(automl.model.estimator))
+            self.logger.log_metrics(
+                flatten_dict(curr_metrics, parent_key=logs_parent_key)
+            )
+            self.logger.save_object(
+                f"hpo/{self.curr_iteration}/{fold_id}/best_config", automl.best_config
+            )
+            self.logger.save_object(
+                f"hpo/{self.curr_iteration}/{fold_id}/estimator",
+                clone(automl.model.estimator),
+            )
 
     def _get_automl_logdir(self, fold_idx: int, filename: str) -> Optional[str]:
         """
@@ -816,17 +1027,24 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         :return: Optional[str]: Path to the AutoML log directory, or None if not set. Example: "<automl_log_dir>/0/0/<filename>.log"
         """
         if self.automl_log_dir is not None:
-            curr_log_dir = self.automl_log_dir / str(self.curr_iteration) / str(
-                fold_idx) / f"{filename}.log"
+            curr_log_dir = (
+                self.automl_log_dir
+                / str(self.curr_iteration)
+                / str(fold_idx)
+                / f"{filename}.log"
+            )
             curr_log_dir.parent.mkdir(parents=True, exist_ok=True)
             curr_log_dir = str(curr_log_dir)
         else:
             curr_log_dir = None
         return curr_log_dir
 
-    def _get_estimator_and_fit_kwargs(self, cluster_id: Optional[int | str],
-                                      fold_id: int,
-                                      use_baseline_est: bool = False):
+    def _get_estimator_and_fit_kwargs(
+        self,
+        cluster_id: Optional[int | str],
+        fold_id: int,
+        use_baseline_est: bool = False,
+    ):
         """
         Gets the estimator and fit kwargs for the current iteration, cluster, and fold.
         If hpo_mode is 'per_iteration', the pre-optimized estimator is fetched from the logger and will be used.
@@ -840,52 +1058,82 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         :return: scikit-learn-like estimator (scikit-learn or AutoML) and fit kwargs (dict)
         """
         fit_kwargs = {}
-        if self.hpo_mode == 'per_iteration':
-            est = self.logger.fetch_object(f"hpo/{self.curr_iteration}/{fold_id}/estimator")
+        if self.hpo_mode == "per_iteration":
+            est = self.logger.fetch_object(
+                f"hpo/{self.curr_iteration}/{fold_id}/estimator"
+            )
         elif use_baseline_est:
-            best_config = self.logger.fetch_object(f"training/{self.curr_iteration}/baseline/{fold_id}/best_config")
+            best_config = self.logger.fetch_object(
+                f"training/{self.curr_iteration}/baseline/{fold_id}/best_config"
+            )
             if best_config is None:
                 raise RuntimeError(
-                    f"use_baseline_est==True, but no pre-optimized config found under 'training/{self.curr_iteration}/baseline/{fold_id}/best_config'")
-            est = get_sklearn_estim(estimator_name=self.estimator_name,
-                                    task=self.task,
-                                    best_flaml_config=best_config)
+                    f"use_baseline_est==True, but no pre-optimized config found under 'training/{self.curr_iteration}/baseline/{fold_id}/best_config'"
+                )
+            est = get_sklearn_estim(
+                estimator_name=self.estimator_name,
+                task=self.task,
+                best_flaml_config=best_config,
+            )
         else:
             est = None
         if est is None:
-            if self.hpo_mode == 'per_iteration' or use_baseline_est:
+            if self.hpo_mode == "per_iteration" or use_baseline_est:
                 raise RuntimeError(
-                    f"hpo_mode is 'per_iteration' or use_baseline_est==True, but no pre-optimized estimator found under 'hpo/{self.curr_iteration}/{fold_id}/estimator' or 'training/{self.curr_iteration}/baseline/{fold_id}/best_config'")
-            elif self.hpo_mode == 'off':
-                est = get_sklearn_estim(self.estimator_name, task=self.task, best_flaml_config=None)
+                    f"hpo_mode is 'per_iteration' or use_baseline_est==True, but no pre-optimized estimator found under 'hpo/{self.curr_iteration}/{fold_id}/estimator' or 'training/{self.curr_iteration}/baseline/{fold_id}/best_config'"
+                )
+            elif self.hpo_mode == "off":
+                est = get_sklearn_estim(
+                    self.estimator_name, task=self.task, best_flaml_config=None
+                )
             else:  # self.hpo_mode == 'per_feature_set'
                 fit_kwargs = self.automl_settings.copy()
                 if self.automl_log_dir is not None:
                     if cluster_id is not None:
-                        curr_log_dir = self.automl_log_dir / str(self.curr_iteration) / str(cluster_id) / str(
-                            fold_id) / "automl_hpo.log"
+                        curr_log_dir = (
+                            self.automl_log_dir
+                            / str(self.curr_iteration)
+                            / str(cluster_id)
+                            / str(fold_id)
+                            / "automl_hpo.log"
+                        )
                     else:
-                        curr_log_dir = self.automl_log_dir / str(self.curr_iteration) / str(
-                            fold_id) / "automl_hpo.log"
+                        curr_log_dir = (
+                            self.automl_log_dir
+                            / str(self.curr_iteration)
+                            / str(fold_id)
+                            / "automl_hpo.log"
+                        )
                     curr_log_dir.parent.mkdir(parents=True, exist_ok=True)
                     fit_kwargs["log_file_name"] = str(curr_log_dir)
-                fit_kwargs['starting_points'] = self.logger.fetch_object(
-                    f"warmup/{self.curr_iteration}/{fold_id}/starting_points")
-                if self.warm_starts and fit_kwargs['starting_points'] is None:
+                fit_kwargs["starting_points"] = self.logger.fetch_object(
+                    f"warmup/{self.curr_iteration}/{fold_id}/starting_points"
+                )
+                if self.warm_starts and fit_kwargs["starting_points"] is None:
                     raise RuntimeError(
-                        f"Warm starts are enabled, but no starting points found under 'warmup/{self.curr_iteration}/{fold_id}/starting_points'")
-                est = get_automl_with_registered_models(self.automl_settings['estimator_list'])
+                        f"Warm starts are enabled, but no starting points found under 'warmup/{self.curr_iteration}/{fold_id}/starting_points'"
+                    )
+                est = get_automl_with_registered_models(
+                    self.automl_settings["estimator_list"]
+                )
         else:
-            self._console_log("Using pre-optimized estimator", fold_id=fold_id, method_name="_evaluate_cluster")
+            self._console_log(
+                "Using pre-optimized estimator",
+                fold_id=fold_id,
+                method_name="_evaluate_cluster",
+            )
 
         return est, fit_kwargs
 
-    def _evaluate_cluster(self, X: pd.DataFrame,
-                          y: np.ndarray,
-                          current_features: list[str],
-                          cv: list[tuple[np.ndarray, np.ndarray]],
-                          cluster_id: int | str,
-                          use_baseline_est: bool = False) -> None:
+    def _evaluate_cluster(
+        self,
+        X: pd.DataFrame,
+        y: np.ndarray,
+        current_features: list[str],
+        cv: list[tuple[np.ndarray, np.ndarray]],
+        cluster_id: int | str,
+        use_baseline_est: bool = False,
+    ) -> None:
         """
         Evaluates a feature cluster by training and validating the estimator on the given features.
         Logs training and validation metrics via self.logger.
@@ -898,36 +1146,55 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         :return: None. Everything is logged via self.logger.
         """
         for fold_id, (train_idx, val_idx) in enumerate(cv):
-            est, fit_kwargs = self._get_estimator_and_fit_kwargs(cluster_id, fold_id, use_baseline_est=use_baseline_est)
+            est, fit_kwargs = self._get_estimator_and_fit_kwargs(
+                cluster_id, fold_id, use_baseline_est=use_baseline_est
+            )
             fit_start_time = time.perf_counter()
-            est.fit(X.iloc[train_idx].loc[:, current_features], y[train_idx], **fit_kwargs)
+            est.fit(
+                X.iloc[train_idx].loc[:, current_features], y[train_idx], **fit_kwargs
+            )
             fit_end_time = time.perf_counter()
             training_metrics = {"duration": fit_end_time - fit_start_time}
 
             if isinstance(est, AutoML):
                 self.logger.save_object(
                     f"training/{self.curr_iteration}/{cluster_id}/{fold_id}/best_config",
-                    est.best_config)
-                training_metrics['n_trials'] = est._search_states[self.estimator_name].total_iter
+                    est.best_config,
+                )
+                training_metrics["n_trials"] = est._search_states[
+                    self.estimator_name
+                ].total_iter
                 est = est.model.estimator
 
-            validation_metrics = evaluate_on_test_set(est,
-                                                      X.iloc[val_idx].loc[:, current_features],
-                                                      y[val_idx],
-                                                      scoring=self.metrics,
-                                                      bootstrap_sample_size=self.bootstrap_sample_size,
-                                                      test_set_bootstrap=True,
-                                                      bootstrap_indices=self.bootstrap_indices[
-                                                          fold_id] if self.bootstrap_indices is not None else None, )
+            validation_metrics = evaluate_on_test_set(
+                est,
+                X.iloc[val_idx].loc[:, current_features],
+                y[val_idx],
+                scoring=self.metrics,
+                bootstrap_sample_size=self.bootstrap_sample_size,
+                test_set_bootstrap=True,
+                bootstrap_indices=self.bootstrap_indices[fold_id]
+                if self.bootstrap_indices is not None
+                else None,
+            )
 
-            self._cluster_priorities[cluster_id] = self._aggregate(validation_metrics[self.scoring])
+            self._cluster_priorities[cluster_id] = self._aggregate(
+                validation_metrics[self.scoring]
+            )
 
             self.logger.log_metrics(
-                flatten_dict(training_metrics, parent_key=f"training/{self.curr_iteration}/{cluster_id}/{fold_id}")
+                flatten_dict(
+                    training_metrics,
+                    parent_key=f"training/{self.curr_iteration}/{cluster_id}/{fold_id}",
+                )
             )
 
             self.logger.log_metrics_array(
-                flatten_dict(validation_metrics, parent_key=f"validation/{self.curr_iteration}/{cluster_id}"))
+                flatten_dict(
+                    validation_metrics,
+                    parent_key=f"validation/{self.curr_iteration}/{cluster_id}",
+                )
+            )
 
     def _aggregate(self, arr: np.ndarray) -> np.floating[Any]:
         return aggregate(self.aggregation_mode, arr)
@@ -940,15 +1207,17 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         :return: None
         """
         self.logger.log_metrics_array(
-            flatten_dict(
-                self.logger.fetch_all_values(source),
-                parent_key=dest
-            )
+            flatten_dict(self.logger.fetch_all_values(source), parent_key=dest)
         )
         self.logger.copy_all_objects(source, dest)
 
-    def _create_baseline(self, X: pd.DataFrame, y: np.ndarray, current_features: list[str],
-                         cv: list[tuple[np.ndarray, np.ndarray]]) -> None:
+    def _create_baseline(
+        self,
+        X: pd.DataFrame,
+        y: np.ndarray,
+        current_features: list[str],
+        cv: list[tuple[np.ndarray, np.ndarray]],
+    ) -> None:
         """
         For the first iteration (self.curr_iteration == 0), creates validation results with all existing features.
         For subsequent iterations, it is not necessary to recompute the results.
@@ -958,22 +1227,41 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         :param cv: List of (train_idx, val_idx) tuples for cross-validation.
         :return: None. Everything is logged via self.logger.
         """
-        if len(self._selected_cluster_ids) > 0 and (self.logger.has_key(f"training/{self.curr_iteration - 1}/{self._selected_cluster_ids[-1]}") or self.logger.has_key(f"validation/{self.curr_iteration - 1}/{self._selected_cluster_ids[-1]}")):
+        if len(self._selected_cluster_ids) > 0 and (
+            self.logger.has_key(
+                f"training/{self.curr_iteration - 1}/{self._selected_cluster_ids[-1]}"
+            )
+            or self.logger.has_key(
+                f"validation/{self.curr_iteration - 1}/{self._selected_cluster_ids[-1]}"
+            )
+        ):
             self._console_log(
                 "Baseline results already exist from previous iteration, copying to current iteration.",
-                method_name="_create_baseline")
+                method_name="_create_baseline",
+            )
             # copy previous best results to current iteration (-> serves as baseline for current iteration)
             # no need to recompute / re-evaluate
-            for s in ['training', 'validation']:
-                source = f"{s}/{self.curr_iteration - 1}/{self._selected_cluster_ids[-1]}"
+            for s in ["training", "validation"]:
+                source = (
+                    f"{s}/{self.curr_iteration - 1}/{self._selected_cluster_ids[-1]}"
+                )
                 dest = f"{s}/{self.curr_iteration}/baseline"
                 self._copy_results_and_objects(source, dest)
         else:
-            self._console_log("Creating baseline results by evaluating all current features.", method_name="_create_baseline")
+            self._console_log(
+                "Creating baseline results by evaluating all current features.",
+                method_name="_create_baseline",
+            )
             self._evaluate_cluster(X, y, current_features, cv, cluster_id="baseline")
 
-    def _evaluate_feature(self, X: pd.DataFrame, y: np.ndarray, current_features: list[str],
-                          cv: list[tuple[np.ndarray, np.ndarray]], feature_name: str) -> None:
+    def _evaluate_feature(
+        self,
+        X: pd.DataFrame,
+        y: np.ndarray,
+        current_features: list[str],
+        cv: list[tuple[np.ndarray, np.ndarray]],
+        feature_name: str,
+    ) -> None:
         """
         Evaluates a single feature by training and validating the estimator on the given features.
         Logs training and validation metrics via self.logger.
@@ -985,7 +1273,9 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         :param feature_name: Name of the feature being evaluated.
         :return: None. Everything is logged via self.logger.
         """
-        self._evaluate_cluster(X, y, current_features, cv, cluster_id=feature_name, use_baseline_est=True)
+        self._evaluate_cluster(
+            X, y, current_features, cv, cluster_id=feature_name, use_baseline_est=True
+        )
 
     def _get_cluster_queue(self):
         """
@@ -996,7 +1286,9 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         """
         # Filter out already selected clusters
         remaining_clusters = {
-            k: v for k, v in self.clusters.items() if k not in self._selected_cluster_ids
+            k: v
+            for k, v in self.clusters.items()
+            if k not in self._selected_cluster_ids
         }
 
         # Sort by priority (descending: higher priority first)
@@ -1004,14 +1296,13 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
             remaining_clusters.items(),
             key=lambda item: self._cluster_priorities.get(item[0], np.inf),
             # default priority np.inf -> foster exploration
-            reverse=True
+            reverse=True,
         )
 
         # Preserve ordering by constructing a new dict
         return dict(sorted_items)
 
-    def _get_best_cluster(self,
-                          cluster_ids: list[int | str]) -> int | str:
+    def _get_best_cluster(self, cluster_ids: list[int | str]) -> int | str:
         """
         Select the best cluster based on the primary metric.
         :param cluster_ids: Cluster ids to consider. Can also include feature names (str) in case of feature-level testing.
@@ -1020,26 +1311,40 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         """
 
         # remove cluster_ids that would violate selection size
-        cluster_ids = [cid for cid in cluster_ids if not self._would_violate_selection_size(cid)]
+        cluster_ids = [
+            cid for cid in cluster_ids if not self._would_violate_selection_size(cid)
+        ]
 
         score_dict = self.logger.fetch_all_values(f"validation/{self.curr_iteration}")
 
         # filter for primary metric
-        score_dict = {cluster_id: score_dict[str(cluster_id)][self.scoring] for cluster_id in cluster_ids}
+        score_dict = {
+            cluster_id: score_dict[str(cluster_id)][self.scoring]
+            for cluster_id in cluster_ids
+        }
 
         # Aggregate scores per cluster
-        score_dict = {cluster_id: self._aggregate(scores) for cluster_id, scores in score_dict.items()}
+        score_dict = {
+            cluster_id: self._aggregate(scores)
+            for cluster_id, scores in score_dict.items()
+        }
 
         # Get cluster with best (=highest) aggregated score
         # If multiple clusters have the same best score, choose one randomly
         best_score = max(score_dict.values())
-        cluster_candidates = [cluster_id for cluster_id, score in score_dict.items() if score == best_score]
+        cluster_candidates = [
+            cluster_id
+            for cluster_id, score in score_dict.items()
+            if score == best_score
+        ]
         cluster_candidate = random.choice(cluster_candidates)
 
         return cluster_candidate
 
     @staticmethod
-    def _non_inferior(baseline_scores: np.ndarray, test_scores: np.ndarray, margin: float, beta: float) -> bool:
+    def _non_inferior(
+        baseline_scores: np.ndarray, test_scores: np.ndarray, margin: float, beta: float
+    ) -> bool:
         """
         Perform a one-sided non-inferiority test to check if the test_scores are not worse than baseline_scores
         by more than the specified margin with a significance level of beta.
@@ -1060,11 +1365,15 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         :return: True if non-inferiority is established, False otherwise.
         """
         baseline_score_array = self.logger.fetch_values(
-            f"validation/{self.curr_iteration}/baseline/{self.scoring}")
+            f"validation/{self.curr_iteration}/baseline/{self.scoring}"
+        )
         cluster_score_array = self.logger.fetch_values(
-            f"validation/{self.curr_iteration}/{cluster_id}/{self.scoring}")
+            f"validation/{self.curr_iteration}/{cluster_id}/{self.scoring}"
+        )
 
-        return self._non_inferior(baseline_score_array, cluster_score_array, self.tolerance_margin, self.beta)
+        return self._non_inferior(
+            baseline_score_array, cluster_score_array, self.tolerance_margin, self.beta
+        )
 
     def _feature_non_inferior(self, feature_name: str) -> bool:
         """
@@ -1073,11 +1382,15 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         :return: True if non-inferiority is established, False otherwise.
         """
         baseline_score_array = self.logger.fetch_values(
-            f"validation/{self.curr_iteration}/baseline/{self.scoring}")
+            f"validation/{self.curr_iteration}/baseline/{self.scoring}"
+        )
         cluster_score_array = self.logger.fetch_values(
-            f"validation/{self.curr_iteration}/{feature_name}/{self.scoring}")
+            f"validation/{self.curr_iteration}/{feature_name}/{self.scoring}"
+        )
 
-        return self._non_inferior(baseline_score_array, cluster_score_array, self.tolerance_margin, self.beta)
+        return self._non_inferior(
+            baseline_score_array, cluster_score_array, self.tolerance_margin, self.beta
+        )
 
     def _would_violate_selection_size(self, cluster_id: int | str) -> bool:
         """
@@ -1086,15 +1399,26 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         :param cluster_id: ID of the cluster to check (int) or feature name (str).
         :return: False if can be safely removed/added, True if would violate selection size.
         """
-        cluster_size = len(self.clusters[cluster_id]) if isinstance(cluster_id, int) else 1
-        new_selected_feature_count = self._currently_selected_features() - cluster_size if self.direction == 'backward' else \
-            self._currently_selected_features() + cluster_size
+        cluster_size = (
+            len(self.clusters[cluster_id]) if isinstance(cluster_id, int) else 1
+        )
+        new_selected_feature_count = (
+            self._currently_selected_features() - cluster_size
+            if self.direction == "backward"
+            else self._currently_selected_features() + cluster_size
+        )
 
-        if self.direction == 'backward' and new_selected_feature_count < self.n_features_to_select:
+        if (
+            self.direction == "backward"
+            and new_selected_feature_count < self.n_features_to_select
+        ):
             # We would undershoot
             return True
 
-        if self.direction == 'forward' and new_selected_feature_count > self.n_features_to_select:
+        if (
+            self.direction == "forward"
+            and new_selected_feature_count > self.n_features_to_select
+        ):
             # We would overshoot
             return True
 
@@ -1108,15 +1432,19 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         :return: ID of the new cluster
         """
         if feature_name not in self.clusters[origin_cluster_id]:
-            raise ValueError(f"Feature {feature_name} not in cluster {origin_cluster_id}")
+            raise ValueError(
+                f"Feature {feature_name} not in cluster {origin_cluster_id}"
+            )
         if len(self.clusters[origin_cluster_id]) == 1:
-            raise ValueError(f"Cluster {origin_cluster_id} only contains one feature, cannot split further.")
+            raise ValueError(
+                f"Cluster {origin_cluster_id} only contains one feature, cannot split further."
+            )
         new_cluster_id = max(self.clusters.keys()) + 1
         self.clusters[new_cluster_id] = [feature_name]
         self.clusters[origin_cluster_id].remove(feature_name)
 
         # copy logged results from origin cluster to new cluster for current iteration
-        for s in ['training', 'validation']:
+        for s in ["training", "validation"]:
             source = f"{s}/{self.curr_iteration}/{feature_name}"
             dest = f"{s}/{self.curr_iteration}/{new_cluster_id}"
             self._copy_results_and_objects(source, dest)
@@ -1129,7 +1457,9 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         :return: str: Description of the cross-validation splits.
         """
         if not isinstance(self.cv, list):
-            raise ValueError("cv must be a list of (train_idx, val_idx) tuples to describe.")
+            raise ValueError(
+                "cv must be a list of (train_idx, val_idx) tuples to describe."
+            )
         if len(self.cv) > 1:
             string = f"Using {len(self.cv)}-fold cross-validation.\n"
         else:
@@ -1151,7 +1481,9 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         :return: DataFrame with unimportant features removed.
         """
         if not self._fit_successful:
-            raise RuntimeError("transform() called before fit() or fit() was not successful.")
+            raise RuntimeError(
+                "transform() called before fit() or fit() was not successful."
+            )
         return X.loc[:, self.get_support()]
 
     def _update_support(self):
@@ -1159,11 +1491,16 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         Updates the support_ attribute with the currently selected features.
         :return:
         """
-        included_cluster_ids = self._selected_cluster_ids if self.direction == 'forward' else set(
-            self.clusters.keys()) - set(self._selected_cluster_ids)
-        self.support_ = self.fixed_features + [_cluster_feature for _cluster_id in included_cluster_ids for
-                                               _cluster_feature in
-                                               self.clusters[_cluster_id]]
+        included_cluster_ids = (
+            self._selected_cluster_ids
+            if self.direction == "forward"
+            else set(self.clusters.keys()) - set(self._selected_cluster_ids)
+        )
+        self.support_ = self.fixed_features + [
+            _cluster_feature
+            for _cluster_id in included_cluster_ids
+            for _cluster_feature in self.clusters[_cluster_id]
+        ]
 
     def get_support(self) -> list[str]:
         """
@@ -1181,11 +1518,13 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         """
         return self.get_support()
 
-    def _get_current_features(self,
-                              clusters_under_test: dict[int, list[str]],
-                              curr_selected_cluster_ids: Optional[list[int]],
-                              curr_tested_cluster_id: Optional[int],
-                              curr_tested_feature: Optional[str]) -> list[str]:
+    def _get_current_features(
+        self,
+        clusters_under_test: dict[int, list[str]],
+        curr_selected_cluster_ids: Optional[list[int]],
+        curr_tested_cluster_id: Optional[int],
+        curr_tested_feature: Optional[str],
+    ) -> list[str]:
         """
         Get the list of features to be used for training and evaluation.
         :param clusters_under_test: All remaining clusters that are still under test. Only needed in 'backward' mode.
@@ -1195,37 +1534,48 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         :return: List of feature names to be used for training and evaluation. Fixed features are always included.
         """
         if curr_tested_cluster_id is not None and curr_tested_feature is not None:
-            raise ValueError("Either curr_tested_cluster_id or curr_tested_feature can be given, but not both.")
-        if self.direction == 'backward':  # The cluster is removed in the backward case
+            raise ValueError(
+                "Either curr_tested_cluster_id or curr_tested_feature can be given, but not both."
+            )
+        if self.direction == "backward":  # The cluster is removed in the backward case
             current_clusters = clusters_under_test.copy()
             if curr_tested_cluster_id is not None:
                 current_clusters.pop(curr_tested_cluster_id)
         else:  # forward
             # select all clusters that have already been added because they improved the score
-            current_clusters = {_cluster_id: self.clusters[_cluster_id] for _cluster_id in
-                                curr_selected_cluster_ids}
+            current_clusters = {
+                _cluster_id: self.clusters[_cluster_id]
+                for _cluster_id in curr_selected_cluster_ids
+            }
             if curr_tested_cluster_id is not None:
                 # add the current cluster that should be checked for score improvement
-                current_clusters[curr_tested_cluster_id] = self.clusters[curr_tested_cluster_id]
+                current_clusters[curr_tested_cluster_id] = self.clusters[
+                    curr_tested_cluster_id
+                ]
 
         # current_clusters now contains the feature clusters being used for training in the remainder of this loop
         # Get a flat list of all features contained in these clusters:
-        current_features = [_cluster_feature for _cluster in current_clusters.values() for _cluster_feature in
-                            _cluster]
+        current_features = [
+            _cluster_feature
+            for _cluster in current_clusters.values()
+            for _cluster_feature in _cluster
+        ]
 
         if curr_tested_feature is not None:
-            if self.direction == 'forward':
+            if self.direction == "forward":
                 if curr_tested_feature not in current_features:
                     current_features.append(curr_tested_feature)
                 else:
                     raise ValueError(
-                        f"Feature {curr_tested_feature} already in current features, cannot add again.")
+                        f"Feature {curr_tested_feature} already in current features, cannot add again."
+                    )
             else:  # backward
                 if curr_tested_feature in current_features:
                     current_features.remove(curr_tested_feature)
                 else:
                     raise ValueError(
-                        f"Feature {curr_tested_feature} not in current features, cannot remove.")
+                        f"Feature {curr_tested_feature} not in current features, cannot remove."
+                    )
 
         # If there are any fixed features excluded from the feature selection process,
         # but used anyway, these are added here:

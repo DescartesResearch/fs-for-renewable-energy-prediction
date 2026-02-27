@@ -78,7 +78,7 @@ def validate_experiment_args(args):
         raise ValueError(f"Invalid domain: {args.domain}. Must be in {Constants.DOMAINS}.")
     if args.asset_id is None:
         raise ValueError("Asset ID must be specified.")
-    if not args.model in Constants.MODELS:
+    if args.model not in Constants.MODELS:
         raise ValueError(f"Invalid models: {args.model}. Must be in {Constants.MODELS}.")
     if args.features not in Constants.FEATURE_SET_TYPES:
         raise ValueError(f"Invalid feature set type: {args.features}. Must be in {Constants.FEATURE_SET_TYPES}.")
@@ -89,25 +89,30 @@ def validate_experiment_args(args):
         raise ValueError("Random seed must be specified.")
 
     if args.fs_method in ["SFS", "CSFS"]:
-        if args.hpo_mode not in Constants.HPO_MODES or args.feature_level_hpo_mode not in Constants.HPO_MODES:
-            raise ValueError(f"Invalid HPO mode: {args.hpo_mode}. Must be in {Constants.HPO_MODES}.")
         if args.direction not in ["forward", "backward"]:
             raise ValueError(f"Invalid direction: {args.direction}. Must be in ['forward', 'backward'].")
+    else:
+        if args.direction is not None:
+            raise ValueError(f"Direction should only be specified when using SFS or CSFS as fs_method, but is: {args.direction}")
+    
+    if args.fs_method == "CSFS":
+        if args.hpo_mode not in Constants.HPO_MODES or args.feature_level_hpo_mode not in Constants.HPO_MODES:
+            raise ValueError(f"Invalid HPO mode: {args.hpo_mode}. Must be in {Constants.HPO_MODES}.")
         if args.clustering_method not in Constants.CLUSTERING_METHODS:
             raise ValueError(
                 f"Invalid clustering method: {args.clustering_method}. Must be in {Constants.CLUSTERING_METHODS}.")
         if args.clustering_method in ["random", "feature_importance"]:
             if args.group_size is None:
                 raise ValueError(f"group_size must be specified when using "
-                                 f"{args.clustering_method} clustering method.")
+                                f"{args.clustering_method} clustering method.")
         else:
             if args.group_size is not None:
                 raise ValueError(f"group_size should not be specified when using "
-                                 f"{args.clustering_method} clustering method.")
+                                f"{args.clustering_method} clustering method.")
     else:
-        for v in [args.hpo_mode, args.direction, args.clustering_method, args.group_size]:
+        for v in [args.hpo_mode, args.clustering_method, args.group_size]:
             if v is not None:
-                raise ValueError(f"{v} should not be specified when not using SFS or CSFS as fs_method.")
+                raise ValueError(f"{v} should only be specified when using CSFS as fs_method.")
 
     # Confidence interval settings:
     if args.cv:
@@ -120,9 +125,9 @@ def validate_experiment_args(args):
             raise ValueError("Number of bootstrap samples must be specified when using bootstrapping.")
 
     # HPO settings:
-    if args.hpo_mode != 'off':
+    if args.hpo_mode is not None and args.hpo_mode != 'off':
         if not ((args.hpo_max_iter is not None) ^ (args.hpo_time_budget is not None)):
-            raise ValueError("You must specify either hpo_max_iter or hpo_time_budget, but not both.")
+            raise ValueError("You must specify either hpo_max_iter or hpo_time_budget, not none and not both.")
     if args.warm_starts:
         if not ((args.warmup_max_iter is not None) ^ (args.warmup_time_budget is not None)):
             raise ValueError("You must specify either warmup_max_iter or warmup_time_budget, but not both.")
@@ -285,6 +290,7 @@ def run_experiment(args):
         'datetimes': datetimes_train_val,
         'bootstrap_sample_size': args.n_bootstrap_samples,
         'n_features_to_select': args.n_features,
+        'n_jobs': args.n_jobs,
         'verbose': 3,
         'hpo_mode': args.hpo_mode,
         'feature_level_hpo_mode': args.feature_level_hpo_mode,
