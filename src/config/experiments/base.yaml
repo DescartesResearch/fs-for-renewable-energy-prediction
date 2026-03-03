@@ -14,7 +14,7 @@ min_memory_bytes: 20000000000
 
 # Experiment management
 overwrite: false
-dry_run: true
+dry_run: false
 
 dataset:
   domain: ???  # Required: wind or pv
