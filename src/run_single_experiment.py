@@ -247,7 +247,6 @@ def run_experiment(cfg: DictConfig):
 
     seed_everything(cfg["random_seed"])
     model_name = cfg.model.name
-    cfg["metrics"] = Constants.METRICS
 
     fslogger = FSLogger(cfg["name"])
 
