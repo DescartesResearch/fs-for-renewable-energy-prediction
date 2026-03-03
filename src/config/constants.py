@@ -35,12 +35,13 @@ class Constants:
     DOMAINS = ["wind", "pv"]
     MODELS = ["mlp", "lgbm", "gp", "xgboost", "rf"]
     FEATURE_SET_TYPES = ["forecast_available", "digital_twin"]
-    HPO_MODES = ['off', 'per_iteration', 'per_feature_set']
+    HPO_MODES = ['off', 'on', 'per_iteration', 'per_feature_set']
     CLUSTERING_METHODS = ["correlation", "random", "feature_importance", "singletons"]
     METRICS = {
         # metric to be used as primary score (higher is better)
-        "neg_rmse": ("rmse", "-"),
+        "neg_mse": ("mse", "-"),
         # additional metrics for evaluation
+        "mse": ("mse", "+"),
         "r2": ("r2", "+"),
         "mae": ("mae", "+"),
         "rmse": ("rmse", "+"),

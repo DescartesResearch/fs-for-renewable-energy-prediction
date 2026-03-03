@@ -3,6 +3,7 @@
 .github
 .env
 logs
+outputs
 report
 report_test
 *.pyc

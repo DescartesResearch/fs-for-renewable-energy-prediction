@@ -104,7 +104,7 @@ class ExtendedLogger(Logger, ABC):
         pass
 
     @abstractmethod
-    def has_key(self, key: str) -> bool:
+    def has_key(self, key: str, strict: bool = True) -> bool:
         pass
 
     @abstractmethod
@@ -127,7 +127,7 @@ class DummyLogger(ExtendedLogger):
     def log_metrics(self, metrics: Dict[str, float], step: Optional[int] = None) -> None:
         pass
 
-    def has_key(self, key: str) -> bool:
+    def has_key(self, key: str, strict: bool = True) -> bool:
         return False
 
     def log_metrics_array(self, metrics: Dict[str, np.ndarray | float], step: Optional[int] = None) -> None:
@@ -369,9 +369,9 @@ class CompositeLogger(ExtendedLogger):
             logger.log_model_summary(model, max_depth)
 
     @rank_zero_only
-    def has_key(self, key: str) -> bool:
+    def has_key(self, key: str, strict: bool = True) -> bool:
         for logger in self.loggers:
-            if logger.has_key(key):
+            if logger.has_key(key, strict=strict):
                 return True
         return False
 
@@ -693,12 +693,35 @@ class FSLogger(ExtendedLogger):
         self.save_string("model_summary", model_str)
 
     @rank_zero_only
-    def has_key(self, key: str) -> bool:
+    def has_key(self, key: str, strict: bool = True) -> bool:
+        """
+        Check if a key exists in metrics.
+        
+        Args:
+            key: The key to check
+            strict: If True, check for exact key match. If False, also match keys that start with key/
+        
+        Returns:
+            True if key exists, False otherwise
+        """
         # check in-memory first
-        if key in self.metrics_values or key in self.metrics_arrays_values:
-            return True
+        if strict:
+            if key in self.metrics_values or key in self.metrics_arrays_values:
+                return True
         else:
-            # check on disk
+            # non-strict: check if key exists exactly or if any key starts with key + separator
+            if key in self.metrics_values or key in self.metrics_arrays_values:
+                return True
+            prefix = key + self.group_separator
+            for k in self.metrics_values.keys():
+                if k.startswith(prefix):
+                    return True
+            for k in self.metrics_arrays_values.keys():
+                if k.startswith(prefix):
+                    return True
+        
+        # check on disk
+        if strict:
             p_npy = self.log_dir / key
             p_npy = p_npy.with_name(f"{p_npy.name}.npy")
             p_txt = self.log_dir / key
@@ -708,6 +731,20 @@ class FSLogger(ExtendedLogger):
             p_ckpt = self.log_dir / key
             p_ckpt = p_ckpt.with_name(f"{p_ckpt.name}.ckpt")
             return p_npy.is_file() or p_txt.is_file() or p_pkl.is_file() or p_ckpt.is_file()
+        else:
+            # non-strict: check if there are any files under self.log_dir / key
+            key_dir = self.log_dir / key
+            if key_dir.exists() and key_dir.is_dir():
+                # Check if there are any files with the expected extensions
+                for suffix in [".npy", ".txt", ".pkl", ".ckpt"]:
+                    if list(key_dir.rglob(f"*{suffix}")):
+                        return True
+            # Also check if the key itself exists as a file (in case it's stored directly)
+            for suffix in [".npy", ".txt", ".pkl", ".ckpt"]:
+                p = (self.log_dir / key).with_name(f"{(self.log_dir / key).name}{suffix}")
+                if p.is_file():
+                    return True
+            return False
 
 
 def get_logger(name: str, version: Optional[str] = None):

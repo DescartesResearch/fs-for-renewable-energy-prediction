@@ -8,6 +8,7 @@ import torch
 from pytorch_lightning import seed_everything
 import numpy as np
 import pandas as pd
+from omegaconf import DictConfig
 
 from data.data_processing import DataFrameProcessor, DataUtils
 from data.feature_names import get_features_by_tags
@@ -15,7 +16,7 @@ from data import get_dataset
 from feature_selection.feature_selection import get_feature_selector
 from models.models import get_automl_with_registered_models, needs_cyclical_encoding
 from training.logging import FSLogger
-from utils.eval import evaluate_on_test_set, data_leakage
+from utils.eval import evaluate_on_test_set  # , data_leakage
 from utils.misc import limit_memory, flatten_dict
 from config.constants import Constants
 
@@ -26,8 +27,9 @@ if root_logger.hasHandlers():
     root_logger.handlers.clear()
 
 # Formatter
-formatter = logging.Formatter(fmt='%(asctime)s %(message)s',
-                              datefmt='%d.%m.%y %H:%M:%S')
+formatter = logging.Formatter(
+    fmt="%(asctime)s %(message)s", datefmt="%d.%m.%y %H:%M:%S"
+)
 
 # Console (stdout) handler
 console_handler = logging.StreamHandler(sys.stdout)
@@ -68,108 +70,222 @@ def transform_custom_params(params: dict) -> dict:
     return transformed
 
 
-def validate_experiment_args(args):
-    # General required settings:
-    if args.name is None:
+def validate_experiment_args(cfg: DictConfig):
+    """
+    Validate experiment arguments.
+    Reads values directly from nested Hydra DictConfig via attribute access.
+    """
+
+    # General required settings
+    if cfg.name is None:
         raise ValueError("Experiment name must be specified.")
-    if args.fs_method not in Constants.FS_METHODS:
-        raise ValueError(f"Invalid feature selection method: {args.fs_method}. Must be in {Constants.FS_METHODS}.")
-    if args.domain not in Constants.DOMAINS:
-        raise ValueError(f"Invalid domain: {args.domain}. Must be in {Constants.DOMAINS}.")
-    if args.asset_id is None:
+
+    if cfg.hpo.mode not in Constants.HPO_MODES:
+        raise ValueError(
+            f"Invalid HPO mode: {cfg.hpo.mode}. Must be in {Constants.HPO_MODES} or None."
+        )
+
+    if cfg.hpo.feature_level_mode != "off":
+        raise NotImplementedError(
+            f"HPO on feature level not yet supported. Must be 'off' for now, but got {cfg.hpo.feature_level_mode}."
+        )
+
+    if cfg.hpo.feature_level_mode not in ["on", "off"]:
+        raise ValueError(
+            f"Invalid HPO mode: {cfg.hpo.feature_level_mode}. Must be in ['on', 'off']."
+        )
+
+    if cfg.hpo.mode == "per_feature_set" and cfg.hpo.feature_level_mode != "off":
+        raise ValueError(
+            "When hpo.mode is 'per_feature_set', hpo.feature_level_mode must be 'off'."
+        )
+
+    # Feature selection
+    if cfg.feature_selection.method not in Constants.FS_METHODS:
+        raise ValueError(
+            f"Invalid feature selection method: {cfg.feature_selection.method}. Must be in {Constants.FS_METHODS}."
+        )
+
+    if cfg.feature_selection.method in ["SFS", "CSFS"]:
+        if cfg.feature_selection.direction not in ["forward", "backward"]:
+            raise ValueError(
+                f"Invalid direction: {cfg.feature_selection.direction}. Must be in ['forward', 'backward']."
+            )
+    else:
+        if cfg.feature_selection.direction is not None:
+            raise ValueError(
+                "Direction should only be specified when using SFS or CSFS as fs_method, "
+                f"but is: {cfg.feature_selection.direction}"
+            )
+
+    if cfg.feature_selection.method == "CSFS":
+        if cfg.feature_selection.clustering.method not in Constants.CLUSTERING_METHODS:
+            raise ValueError(
+                f"Invalid clustering method: {cfg.feature_selection.clustering.method}. "
+                f"Must be in {Constants.CLUSTERING_METHODS}."
+            )
+
+        if cfg.hpo.mode not in ["per_iteration", "per_feature_set"]:
+            raise NotImplementedError(
+                f"HPO mode {cfg.hpo.mode} not yet supported for CSFS. Only 'per_iteration' and 'per_feature_set' are supported because CSFS relies on iterative feature importance estimation for clustering, which benefits from hyperparameter tuning at each iteration or feature set size."
+            )
+
+        if cfg.feature_selection.clustering.method in ["random", "feature_importance"]:
+            if cfg.feature_selection.clustering.group_size is None:
+                raise ValueError(
+                    "group_size must be specified when using "
+                    f"{cfg.feature_selection.clustering.method} clustering method."
+                )
+        else:
+            if cfg.feature_selection.clustering.group_size is not None:
+                raise ValueError(
+                    "group_size should not be specified when using "
+                    f"{cfg.feature_selection.clustering.method} clustering method."
+                )
+    else:
+        for v in [
+            cfg.feature_selection.clustering.method,
+            cfg.feature_selection.clustering.group_size,
+        ]:
+            if v is not None:
+                raise ValueError(
+                    f"{v} should only be specified when using CSFS as fs_method."
+                )
+
+    if cfg.feature_selection.method == "RF_FI" and cfg.hpo.mode != "on":
+        raise ValueError(
+            "RF_FI feature importance method only supported with hpo turned on, because it is intended that hyperparameters are tuned for better feature importance estimation"
+        )
+    elif (
+        cfg.feature_selection.method in ["mutual_info", "f_value"]
+        and cfg.hpo.mode != "off"
+    ):
+        raise ValueError(
+            f"{cfg.feature_selection.method} feature importance method not supported with hpo turned on."
+        )
+    elif cfg.feature_selection.method == "SFS" and cfg.hpo.mode in [
+        "per_feature_set",
+        "per_iteration",
+    ]:
+        raise ValueError(
+            "SFS is not supported with per_iteration or per_feature_set HPO mode."
+        )
+
+    # Dataset / model / feature settings
+    if cfg.dataset.domain not in Constants.DOMAINS:
+        raise ValueError(
+            f"Invalid domain: {cfg.dataset.domain}. Must be in {Constants.DOMAINS}."
+        )
+
+    if cfg.dataset.asset_id is None:
         raise ValueError("Asset ID must be specified.")
-    if args.model not in Constants.MODELS:
-        raise ValueError(f"Invalid models: {args.model}. Must be in {Constants.MODELS}.")
-    if args.features not in Constants.FEATURE_SET_TYPES:
-        raise ValueError(f"Invalid feature set type: {args.features}. Must be in {Constants.FEATURE_SET_TYPES}.")
-    if args.n_features is None or args.n_features <= 0:
+
+    if cfg.model.name not in Constants.MODELS:
+        raise ValueError(
+            f"Invalid model: {cfg.model.name}. Must be in {Constants.MODELS}."
+        )
+
+    if cfg.features.type not in Constants.FEATURE_SET_TYPES:
+        raise ValueError(
+            f"Invalid feature set type: {cfg.features.type}. Must be in {Constants.FEATURE_SET_TYPES}."
+        )
+
+    if cfg.features.n_features is None or cfg.features.n_features <= 0:
         raise ValueError("Number of features to select must be a positive integer.")
 
-    if args.random_seed is None:
+    if cfg.random_seed is None:
         raise ValueError("Random seed must be specified.")
 
-    if args.fs_method in ["SFS", "CSFS"]:
-        if args.direction not in ["forward", "backward"]:
-            raise ValueError(f"Invalid direction: {args.direction}. Must be in ['forward', 'backward'].")
-    else:
-        if args.direction is not None:
-            raise ValueError(f"Direction should only be specified when using SFS or CSFS as fs_method, but is: {args.direction}")
-    
-    if args.fs_method == "CSFS":
-        if args.hpo_mode not in Constants.HPO_MODES or args.feature_level_hpo_mode not in Constants.HPO_MODES:
-            raise ValueError(f"Invalid HPO mode: {args.hpo_mode}. Must be in {Constants.HPO_MODES}.")
-        if args.clustering_method not in Constants.CLUSTERING_METHODS:
+    # Evaluation settings
+    if cfg.evaluation.cv:
+        if cfg.evaluation.bootstrapping:
             raise ValueError(
-                f"Invalid clustering method: {args.clustering_method}. Must be in {Constants.CLUSTERING_METHODS}.")
-        if args.clustering_method in ["random", "feature_importance"]:
-            if args.group_size is None:
-                raise ValueError(f"group_size must be specified when using "
-                                f"{args.clustering_method} clustering method.")
-        else:
-            if args.group_size is not None:
-                raise ValueError(f"group_size should not be specified when using "
-                                f"{args.clustering_method} clustering method.")
-    else:
-        for v in [args.hpo_mode, args.clustering_method, args.group_size]:
-            if v is not None:
-                raise ValueError(f"{v} should only be specified when using CSFS as fs_method.")
+                "Cannot use both cross-validation and bootstrapping at the same time."
+            )
+        if cfg.evaluation.n_folds is None:
+            raise ValueError(
+                "Number of folds must be specified when using cross-validation."
+            )
 
-    # Confidence interval settings:
-    if args.cv:
-        if args.bootstrapping:
-            raise ValueError("Cannot use both cross-validation and bootstrapping at the same time.")
-        if args.n_folds is None:
-            raise ValueError("Number of folds must be specified when using cross-validation.")
-    if args.bootstrapping:
-        if args.n_bootstrap_samples is None:
-            raise ValueError("Number of bootstrap samples must be specified when using bootstrapping.")
+    if cfg.evaluation.bootstrapping:
+        if cfg.evaluation.n_bootstrap_samples is None:
+            raise ValueError(
+                "Number of bootstrap samples must be specified when using bootstrapping."
+            )
 
-    # HPO settings:
-    if args.hpo_mode is not None and args.hpo_mode != 'off':
-        if not ((args.hpo_max_iter is not None) ^ (args.hpo_time_budget is not None)):
-            raise ValueError("You must specify either hpo_max_iter or hpo_time_budget, not none and not both.")
-    if args.warm_starts:
-        if not ((args.warmup_max_iter is not None) ^ (args.warmup_time_budget is not None)):
-            raise ValueError("You must specify either warmup_max_iter or warmup_time_budget, but not both.")
+    # HPO settings
+    if cfg.hpo.mode is not None and cfg.hpo.mode != "off":
+        if not ((cfg.hpo.max_iter is not None) ^ (cfg.hpo.time_budget is not None)):
+            raise ValueError(
+                "You must specify either hpo.max_iter or hpo.time_budget, not none and not both."
+            )
+
+    if cfg.warm_start.enabled:
+        if not (
+            (cfg.warm_start.max_iter is not None)
+            ^ (cfg.warm_start.time_budget is not None)
+        ):
+            raise ValueError(
+                "You must specify either warm_start.max_iter or warm_start.time_budget, but not both."
+            )
 
 
-def run_experiment(args):
-    validate_experiment_args(args)
-    seed_everything(args.random_seed)
-    model_name = args.model
-    args.metrics = Constants.METRICS
+def run_experiment(cfg: DictConfig):
+    """
+    Run a single experiment.
 
-    fslogger = FSLogger(
-        args.name,
-        model_name,
-    )
+    Args:
+        cfg: Nested Hydra configuration
+    """
+    validate_experiment_args(cfg)
+
+    if cfg.get("dry_run", False):
+        logging.info(
+            "Dry run mode enabled. Validating experiment arguments and exiting without execution."
+        )
+        sys.exit(0)
+
+    seed_everything(cfg["random_seed"])
+    model_name = cfg.model.name
+    cfg["metrics"] = Constants.METRICS
+
+    fslogger = FSLogger(cfg["name"])
 
     if len(os.listdir(fslogger.log_dir)) > 0:
-        if args.name == "debug" or args.overwrite:
-            logging.warning(f"Experiment with name {args.name} already exists in {fslogger.log_dir}. Overwriting.")
+        if cfg["name"] == "debug" or cfg["overwrite"]:
+            logging.warning(
+                f"Experiment with name {cfg['name']} already exists in {fslogger.log_dir}. Overwriting."
+            )
             shutil.rmtree(fslogger.log_dir)
             fslogger.log_dir.mkdir(parents=True, exist_ok=True)
-        elif args.resume_at_iteration is not None:
-            logging.info(f"Resuming experiment {args.name} at iteration {args.resume_at_iteration}.")
+        elif cfg.feature_selection.resume_at_iteration is not None:
+            logging.info(
+                f"Resuming experiment {cfg['name']} at iteration {cfg.feature_selection.resume_at_iteration}."
+            )
         else:
-            raise ValueError(f"Experiment with name {args.name} already exists in {fslogger.log_dir}.")
+            raise ValueError(
+                f"Experiment with name {cfg['name']} already exists in {fslogger.log_dir}."
+            )
 
     # Add file handler for console logs
-    log_filename = fslogger.log_dir / f'console_{datetime.datetime.now().strftime("%y-%m-%d_%H-%M")}.log'
+    log_filename = (
+        fslogger.log_dir
+        / f"console_{datetime.datetime.now().strftime('%y-%m-%d_%H-%M')}.log"
+    )
     log_filename.parent.mkdir(parents=True, exist_ok=True)
 
-    file_handler = logging.FileHandler(log_filename, encoding='utf-8')
+    file_handler = logging.FileHandler(log_filename, encoding="utf-8")
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
 
-    dataset = get_dataset(config=vars(args))
+    dataset = get_dataset(config=cfg.dataset)
     dataset_df = dataset.get_dataframe()
     feature_tags = dataset.get_feature_tags()
 
-    _datetimes = dataset_df['Timestamp']
+    _datetimes = dataset_df["Timestamp"]
 
     # Only keep features according to the selected feature set type
-    if args.features == "forecast_available":
+    if cfg.features.type == "forecast_available":
         inclusion_tags = {"forecast_available"}
         exclusion_tags = {"meta", "target", "power_proxy", "system_state"}
     else:
@@ -185,28 +301,35 @@ def run_experiment(args):
         exclusion_tags.add("cyclical_encoding")
 
     features = get_features_by_tags(
-        feature_tags,
-        tags_include_any=inclusion_tags,
-        tags_exclude=exclusion_tags
+        feature_tags, tags_include_any=inclusion_tags, tags_exclude=exclusion_tags
     )
 
     _X = DataFrameProcessor.filter_columns(features)(dataset_df)
     logging.info(
-        f"X: Removed following meta, target, ... columns: {dataset_df.columns.difference(_X.columns)}")
-    _y = DataFrameProcessor.filter_columns(get_features_by_tags(
-        feature_tags,
-        tags_include_any={"target"}, ))(dataset_df)
+        f"X: Removed following meta, target, ... columns: {dataset_df.columns.difference(_X.columns)}"
+    )
+    _y = DataFrameProcessor.filter_columns(
+        get_features_by_tags(
+            feature_tags,
+            tags_include_any={"target"},
+        )
+    )(dataset_df)
 
     logging.info("Dataset loaded with shape X: {}, y: {}".format(_X.shape, _y.shape))
     logging.info("Features used: {}".format(_X.columns.tolist()))
     logging.info("Target used: {}".format(_y.columns.tolist()))
 
-    split_indices = DataUtils.get_time_split_indices(_datetimes,
-                                                     split_ratio=(1 - args.test_ratio, args.test_ratio),
-                                                     gap=pd.to_timedelta(args.gap))
+    split_indices = DataUtils.get_time_split_indices(
+        _datetimes,
+        split_ratio=(1 - cfg["test_ratio"], cfg["test_ratio"]),
+        gap=pd.to_timedelta(cfg["gap"]),
+    )
+
     for split_idx, split_typ in zip(split_indices, ["Train+Validation", "Test"]):
         logging.info(f"{split_typ}: index=[{split_idx[0]}, {split_idx[-1]}]")
-        logging.info(f"{split_typ}: Datetime=[{_datetimes.iloc[split_idx[0]]}, {_datetimes.iloc[split_idx[-1]]}]")
+        logging.info(
+            f"{split_typ}: Datetime=[{_datetimes.iloc[split_idx[0]]}, {_datetimes.iloc[split_idx[-1]]}]"
+        )
 
     train_val_idx = split_indices[0]
     test_idx = split_indices[1]
@@ -228,85 +351,90 @@ def run_experiment(args):
     # if data_leakage_value != 0:
     #     raise ValueError(f"Data leakage detected. Data leakage value: {data_leakage_value}")
 
-    if args.bootstrapping:
-        test_bootstrap_indices = np.random.randint(low=0,
-                                                   high=len(test_idx),
-                                                   size=(args.n_bootstrap_samples, len(test_idx)))
+    if cfg.evaluation.bootstrapping:
+        test_bootstrap_indices = np.random.randint(
+            low=0,
+            high=len(test_idx),
+            size=(cfg.evaluation.n_bootstrap_samples, len(test_idx)),
+        )
     else:
         test_bootstrap_indices = None
 
-    automl_logdir = fslogger.log_dir / "automl" if fslogger.log_dir is not None else None
+    automl_logdir = (
+        fslogger.log_dir / "automl" if fslogger.log_dir is not None else None
+    )
     automl_logdir.mkdir(parents=True, exist_ok=True)
 
     # Create AutoML settings from base settings and model-specific settings
     BASE_AUTOML_SETTINGS = {
-        'time_budget': args.hpo_time_budget,
-        'max_iter': args.hpo_max_iter,
-        'early_stop': args.hpo_early_stop,
-        'eval_method': 'holdout',
-        'split_ratio': 0.2,
-        'split_type': 'time',
-        'metric': 'mse',  # CustomFLAMLMetrics.median_absolute_error,
-        'task': 'regression',
-        'verbose': 2,
-        'n_jobs': args.n_jobs,
-        'train_time_limit': args.hpo_train_time_limit,
-        'retrain_full': args.hpo_mode == 'per_feature_set',
+        "time_budget": cfg.hpo.time_budget,
+        "max_iter": cfg.hpo.max_iter,
+        "early_stop": cfg.hpo.early_stop,
+        "eval_method": "holdout",
+        "split_ratio": 0.2,
+        "split_type": "time",
+        "metric": "mse",  # CustomFLAMLMetrics.median_absolute_error,
+        "task": "regression",
+        "verbose": 2,
+        "n_jobs": cfg.n_jobs,
+        "train_time_limit": cfg.hpo.train_time_limit,
+        "retrain_full": cfg.hpo.mode == "per_feature_set",
     }
 
     automl_settings = {
         **BASE_AUTOML_SETTINGS,
         **{
             "estimator_list": [model_name],
-        }
+        },
     }
     custom_params = transform_custom_params(Constants.CUSTOM_PARAMS)
     if custom_params.get(model_name, None) is not None:
-        automl_settings['custom_hp'] = {
+        automl_settings["custom_hp"] = {
             model_name: custom_params[model_name],
         }
     automl_ws_settings = automl_settings.copy()
     automl_ws_settings.update(
         {
-            'time_budget': args.warmup_time_budget,
-            'max_iter': args.warmup_max_iter,
-            'early_stop': args.warmup_early_stop,
-            'retrain_full': False,  # Not needed for warmup
+            "time_budget": cfg.warm_start.time_budget,
+            "max_iter": cfg.warm_start.max_iter,
+            "early_stop": cfg.warm_start.early_stop,
+            "retrain_full": False,  # Not needed for warmup
         }
     )
 
     # Configuration for FS method
     fs_config = {
-        'fs_method': args.fs_method,
-        'n_features': args.n_features,
-        'estimator_name': model_name,
-        'fixed_features': [],
-        'direction': args.direction,
-        'metrics': Constants.METRICS,
-        'aggregation_mode': 'median',
+        "fs_method": cfg.feature_selection.method,
+        "n_features": cfg.feature_selection.n_features,
+        "estimator_name": model_name,
+        "fixed_features": [],
+        "direction": cfg.feature_selection.direction,
+        "metrics": Constants.METRICS,
+        "aggregation_mode": "median",
         # cv=cv,
-        'val_ratio': 1 / 3,
-        'gap': pd.to_timedelta(args.gap),
-        'datetimes': datetimes_train_val,
-        'bootstrap_sample_size': args.n_bootstrap_samples,
-        'n_features_to_select': args.n_features,
-        'n_jobs': args.n_jobs,
-        'verbose': 3,
-        'hpo_mode': args.hpo_mode,
-        'feature_level_hpo_mode': args.feature_level_hpo_mode,
-        'automl_settings': automl_settings,
-        'automl_ws_settings': automl_ws_settings,
-        'automl_log_dir': automl_logdir,
-        'warm_starts': args.warm_starts,
-        'random_seed': args.random_seed,
-        'scoring': 'neg_rmse',
-        'fast_mode': args.fast_mode,
-        'early_stopping': False,
-        'clustering_config': {"clustering_method": args.clustering_method,
-                              'group_size': args.group_size,
-                              },
-        'resume_at_iteration': args.resume_at_iteration,
-        'task': dataset.get_task(),
+        "val_ratio": cfg.feature_selection.val_ratio,
+        "gap": pd.to_timedelta(cfg.gap),
+        "datetimes": datetimes_train_val,
+        "bootstrap_sample_size": cfg.evaluation.n_bootstrap_samples,
+        "n_features_to_select": cfg.feature_selection.n_features,
+        "n_jobs": cfg.n_jobs,
+        "verbose": 3,
+        "hpo_mode": cfg.hpo.mode,
+        "feature_level_hpo_mode": cfg.hpo.feature_level_mode,
+        "automl_settings": automl_settings,
+        "automl_ws_settings": automl_ws_settings,
+        "automl_log_dir": automl_logdir,
+        "warm_starts": cfg.warm_start.enabled,
+        "random_seed": cfg.random_seed,
+        "scoring": "neg_rmse",
+        "fast_mode": cfg.feature_selection.fast_mode,
+        "early_stopping": False,
+        "clustering_config": {
+            "clustering_method": cfg.feature_selection.clustering.method,
+            "group_size": cfg.feature_selection.clustering.group_size,
+        },
+        "resume_at_iteration": cfg.feature_selection.resume_at_iteration,
+        "task": dataset.get_task(),
     }
 
     feature_selector = get_feature_selector(fslogger, fs_config)
@@ -320,7 +448,8 @@ def run_experiment(args):
     fs_end_time = time.perf_counter()
     fs_runtime = fs_end_time - fs_start_time
     logging.info(
-        f"Feature selection finished in {str(datetime.timedelta(seconds=fs_runtime))}. Selected features: {feature_selector.get_feature_names_out()}")
+        f"Feature selection finished in {str(datetime.timedelta(seconds=fs_runtime))}. Selected features: {feature_selector.get_feature_names_out()}"
+    )
 
     fslogger.log_metrics({"fs_runtime": fs_runtime})
 
@@ -329,28 +458,32 @@ def run_experiment(args):
 
     logging.info("Start fitting on test set.")
     test_fit_kwargs = automl_settings.copy()
-    test_fit_kwargs['retrain_full'] = True
-    if args.warm_starts:
+    test_fit_kwargs["retrain_full"] = True
+    if cfg.warm_start.enabled:
         logging.info("Start warmup")
         warmup_est = get_automl_with_registered_models(models_to_register=[model_name])
-        warmup_est.fit(X_train_val.copy().loc[:, feature_selector.get_feature_names_out()],
-                       y_train_val.copy().values.ravel(),
-                       **automl_ws_settings,
-                       )
+        warmup_est.fit(
+            X_train_val.copy().loc[:, feature_selector.get_feature_names_out()],
+            y_train_val.copy().values.ravel(),
+            **automl_ws_settings,
+        )
         logging.info("Finished warmup.")
-        test_fit_kwargs['starting_points'] = warmup_est.best_config_per_estimator
+        test_fit_kwargs["starting_points"] = warmup_est.best_config_per_estimator
 
     est = get_automl_with_registered_models(models_to_register=[model_name])
 
     test_fit_start_time = time.perf_counter()
-    est.fit(X_train_val.copy().loc[:, feature_selector.get_feature_names_out()],
-            y_train_val.copy().values.ravel(),
-            **test_fit_kwargs,
-            log_file_name=automl_logdir / "testing" if automl_logdir is not None else None,
-            )
+    est.fit(
+        X_train_val.copy().loc[:, feature_selector.get_feature_names_out()],
+        y_train_val.copy().values.ravel(),
+        **test_fit_kwargs,
+        log_file_name=automl_logdir / "testing" if automl_logdir is not None else None,
+    )
     test_fit_end_time = time.perf_counter()
     test_fit_duration = test_fit_end_time - test_fit_start_time
-    logging.info(f"Test fit finished in {str(datetime.timedelta(seconds=test_fit_duration))}.")
+    logging.info(
+        f"Test fit finished in {str(datetime.timedelta(seconds=test_fit_duration))}."
+    )
     test_results = dict()
     test_results["duration"] = test_fit_duration
     test_results["n_trials"] = est._search_states[model_name].total_iter
@@ -361,8 +494,8 @@ def run_experiment(args):
         X_test=X_test.copy().loc[:, feature_selector.get_feature_names_out()],
         y_test=y_test.copy().values.ravel(),
         scoring=Constants.METRICS,
-        bootstrap_sample_size=args.n_bootstrap_samples,
-        test_set_bootstrap=args.bootstrapping,
+        bootstrap_sample_size=cfg.evaluation.n_bootstrap_samples,
+        test_set_bootstrap=cfg.evaluation.bootstrapping,
     )
 
     fslogger.log_metrics_array(flatten_dict(testing_metrics, parent_key="testing"))
@@ -374,6 +507,6 @@ def run_experiment(args):
             "test_bootstrap_indices": test_bootstrap_indices,
         }
     )
-    fslogger.save_object("exp_args", args)
+    fslogger.save_object("exp_args", cfg)
     fslogger.save()
     fslogger.finalize("success")

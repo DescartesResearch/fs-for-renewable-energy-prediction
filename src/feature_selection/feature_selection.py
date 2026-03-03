@@ -18,8 +18,9 @@ from sklearn.feature_selection import (
     SelectKBest,
     f_regression,
     mutual_info_regression,
-    SequentialFeatureSelector,
+    SequentialFeatureSelector as OriginalSequentialFeatureSelector,
 )
+from sklearn.dummy import DummyRegressor
 import numpy as np
 import pandas as pd
 import random
@@ -95,6 +96,24 @@ def get_feature_selector(
             clustering_config=config["clustering_config"],
             resume_at_iteration=config["resume_at_iteration"],
         )
+    elif config["fs_method"] == "SFS":
+        return SequentialFeatureSelector(
+            estimator_name=config["estimator_name"],
+            n_features_to_select=config["n_features_to_select"],
+            datetimes=config["datetimes"],
+            gap=config["gap"],
+            task=config["task"],
+            direction=config["direction"],
+            automl_settings=config["automl_settings"]
+            if config["hpo_mode"] == "on"
+            else None,
+            tol=None,
+            scoring=config["scoring"],
+            # cv=cv,
+            val_ratio=config["val_ratio"],
+            n_jobs=config["n_jobs"],
+        )
+
     elif config["fs_method"] in ["f_value", "mutual_info", "RF_FI"]:
         if config["fs_method"] in ["f_value", "mutual_info"]:
             score_func = (
@@ -103,22 +122,14 @@ def get_feature_selector(
                 else mutual_info_regression
             )
         else:
+            assert config["hpo_mode"] == "on", (
+                "RF_FI feature importance method only supported with hpo turned on, because it is intended that hyperparameters are tuned for better feature importance estimation"
+            )
             score_func = lambda X, y: get_feature_importance(
                 X, y, automl_settings=config["automl_settings"]
             )
         return SelectKBest(score_func=score_func, k=config["n_features_to_select"])
-    elif config["fs_method"] == "SFS":
-        return SequentialFeatureSelector(
-            estimator=get_sklearn_estim(
-                estimator_name=config["estimator_name"],
-                task=config["task"],
-                best_flaml_config=None,
-            ),
-            n_features_to_select=config["n_features_to_select"],
-            direction=config["direction"],
-            # scoring=config["scoring"], # TODO
-            n_jobs=config["n_jobs"]
-        )
+
     else:
         raise NotImplementedError(f"fs_method {config['fs_method']} not implemented")
 
@@ -206,7 +217,7 @@ def create_feature_clusters(
     elif clustering_method in ["random", "feature_importance"]:
         _features = features.copy()
         if clustering_method == "feature_importance":
-            logging.info("Computing feature importances for clustering:")
+            logging.debug("Computing feature importances for clustering:")
             feature_importances = get_feature_importance(
                 X, y, automl_settings=automl_settings
             )
@@ -215,7 +226,7 @@ def create_feature_clusters(
             feature_importance_tuples.sort(
                 key=lambda x: x[1], reverse=True
             )  # descending, most important first
-            logging.info(
+            logging.debug(
                 "\n".join(f"{t[0]}: {t[1]}" for t in feature_importance_tuples)
             )
             _features = [
@@ -261,7 +272,7 @@ def create_feature_clusters(
         raise RuntimeError(
             f"The following features are missing in the clusters: {missing_features}"
         )
-    logging.info(f"Clustered {len(features)} features into {len(clusters)} clusters")
+    logging.debug(f"Clustered {len(features)} features into {len(clusters)} clusters")
     return clusters
 
 
@@ -408,11 +419,9 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
                 raise ValueError(
                     "automl_ws_settings must be provided if warm_starts is turned on."
                 )
-        
+
             self.automl_ws_settings = self.automl_settings.copy()
-            self.automl_ws_settings.update(
-                automl_ws_settings
-            )
+            self.automl_ws_settings.update(automl_ws_settings)
 
         if self.cv is not None and self.val_ratio is not None:
             raise ValueError("Either cv or val_ratio can be provided, not both.")
@@ -465,7 +474,7 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         X, y = self._validate_clusters(X, y)
 
         if self.bootstrap_sample_size is not None:
-            logging.info("Generating bootstrap indices for test set bootstrapping.")
+            logging.debug("Generating bootstrap indices for test set bootstrapping.")
             self.bootstrap_indices = {
                 fold_id: np.random.randint(
                     low=0,
@@ -489,11 +498,16 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
 
         while not self._has_finished():
             self.curr_iteration += 1
-            logging.info(f"Starting iteration {self.curr_iteration + 1}")
-            logging.info(
-                f"Current selected feature count: {self._currently_selected_features()}"
+            self._console_log(
+                f"Starting iteration {self.curr_iteration + 1}", method_name="fit"
             )
-            logging.info(f"Desired feature count: {self.n_features_to_select}")
+            self._console_log(
+                f"Current selected feature count: {self._currently_selected_features()}",
+                method_name="fit",
+            )
+            self._console_log(
+                f"Desired feature count: {self.n_features_to_select}", method_name="fit"
+            )
 
             current_features = self._get_current_features(
                 clusters_under_test=self._get_cluster_queue(),
@@ -659,7 +673,7 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
                 {"selected_cluster_id": selected_cluster_id}, step=self.curr_iteration
             )
 
-        logging.info(f"CSFS procedure done!")
+        self._console_log(f"CSFS procedure done!", method_name="fit")
         self.logger.save_object("final_clusters", self.clusters)
 
         self._fit_successful = True
@@ -946,7 +960,7 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
     def _console_log(
         self,
         msg: str,
-        level: int = logging.INFO,
+        level: int = logging.DEBUG,
         fold_id: Optional[int] = None,
         method_name: Optional[str] = None,
     ):
@@ -1229,10 +1243,12 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         """
         if len(self._selected_cluster_ids) > 0 and (
             self.logger.has_key(
-                f"training/{self.curr_iteration - 1}/{self._selected_cluster_ids[-1]}"
+                f"training/{self.curr_iteration - 1}/{self._selected_cluster_ids[-1]}",
+                strict=False,
             )
             or self.logger.has_key(
-                f"validation/{self.curr_iteration - 1}/{self._selected_cluster_ids[-1]}"
+                f"validation/{self.curr_iteration - 1}/{self._selected_cluster_ids[-1]}",
+                strict=False,
             )
         ):
             self._console_log(
@@ -1541,7 +1557,10 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
             current_clusters = clusters_under_test.copy()
             if curr_tested_cluster_id is not None:
                 current_clusters.pop(curr_tested_cluster_id)
-        else:  # forward
+        # forward:
+        elif curr_tested_cluster_id is None and curr_tested_feature is None:
+            current_clusters = clusters_under_test.copy()  # first iteration, no cluster tested yet, start with all clusters for baseline
+        else:
             # select all clusters that have already been added because they improved the score
             current_clusters = {
                 _cluster_id: self.clusters[_cluster_id]
@@ -1582,3 +1601,91 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         current_features.extend(self.fixed_features)
 
         return current_features
+
+
+class SequentialFeatureSelector(OriginalSequentialFeatureSelector):
+    """
+    SequentialFeatureSelector wrapper that accepts estimator_name instead of estimator.
+    """
+
+    def __init__(
+        self,
+        estimator_name: str,
+        n_features_to_select: int,
+        datetimes: pd.Series,
+        gap: pd.Timedelta,
+        task: Literal["regression", "classification"],
+        direction: Literal["forward", "backward"],
+        automl_settings: Optional[dict] = None,
+        tol: Optional[float] = None,
+        scoring: Optional[str] = None,
+        cv: Optional[list[tuple] | Any] = None,
+        val_ratio: Optional[float] = None,
+        n_jobs: Optional[int] = None,
+    ):
+        self.estimator_name: str = estimator_name
+        self.task: Literal["regression", "classification"] = task
+        self.automl_settings: Optional[dict] = automl_settings
+        self.val_ratio = val_ratio
+        self.datetimes = datetimes
+        self.gap = gap
+
+        if scoring == "neg_mse":
+            scoring = "neg_mean_squared_error"
+        elif scoring == "neg_mae":
+            scoring = "neg_mean_absolute_error"
+        elif scoring == "neg_rmse":
+            scoring = "neg_root_mean_squared_error"
+        elif scoring is None:
+            pass
+        else:
+            raise ValueError(f"Unsupported scoring metric: {scoring}")
+
+        if cv is None:
+            assert self.val_ratio is not None, (
+                "If cv is not given, val_ratio must be provided to create a train/validation split."
+            )
+            assert self.datetimes is not None, (
+                "If cv is not given, datetimes must be provided to create a train/validation split."
+            )
+            assert self.gap is not None, (
+                "If cv is not given, gap must be provided to create a train/validation split."
+            )
+            train_val_indices = DataUtils.get_time_split_indices(
+                datetimes=self.datetimes,
+                gap=self.gap,
+                split_ratio=(1 - self.val_ratio, self.val_ratio),
+            )
+            cv = [(train_val_indices[0], train_val_indices[1])]
+
+        super().__init__(
+            estimator=DummyRegressor(),  # Placeholder, will be replaced in fit()
+            n_features_to_select=n_features_to_select,
+            tol=tol,
+            direction=direction,
+            scoring=scoring,
+            cv=cv,
+            n_jobs=n_jobs,
+        )
+
+    def fit(self, X, y=None, **fit_params):
+        if self.automl_settings is None:
+            self.estimator = get_sklearn_estim(
+                estimator_name=self.estimator_name,
+                task=self.task,
+                best_flaml_config=None,
+            )
+        else:
+            assert self.estimator_name in self.automl_settings["estimator_list"], (
+                "estimator_name must be in automl_settings['estimator_list'] if automl_settings is given."
+            )
+            automl = get_automl_with_registered_models(
+                models_to_register=self.automl_settings["estimator_list"]
+            )
+            automl.fit(X, y, **self.automl_settings)
+            self.estimator = clone(automl.model.estimator)
+
+        return super().fit(X, y, **fit_params)
+
+
+# ...existing code...

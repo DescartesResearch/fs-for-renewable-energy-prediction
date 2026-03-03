@@ -1,6 +1,6 @@
 import warnings
 from collections import defaultdict
-from typing import Literal
+from typing import Literal, Optional, Dict, Any
 
 import numpy as np
 import pandas as pd
@@ -28,19 +28,73 @@ def exp_config_to_name_and_args(
         clustering_method,
         gs,
         hpo_mode,
+        naming_config: Optional[Dict[str, Any]] = None,
 ):
-    exp_name = f"{ds}-{asset_id}_{model}_n-{n_features}_{feature_set}"
+    """
+    Generate experiment name and command-line arguments from configuration.
+    
+    Args:
+        ds: Domain (wind or pv)
+        asset_id: Asset identifier
+        model: Model name
+        n_features: Number of features
+        feature_set: Feature set type
+        fs_method: Feature selection method
+        clustering_method: Clustering method (for CSFS)
+        gs: Group size (for CSFS)
+        hpo_mode: HPO mode
+        naming_config: Optional YAML naming configuration dict. If provided,
+                      uses NamingEngine for name generation (preferred).
+                      Otherwise uses legacy hard-coded logic.
+    
+    Returns:
+        Tuple of (experiment_name, experiment_args)
+    """
+    # Use NamingEngine if configuration is provided (preferred approach)
+    if naming_config is not None:
+        try:
+            from experiments.naming_engine import NamingEngine
+            # Build params dict matching schema structure
+            params = {
+                "domain": ds,
+                "asset_id": asset_id,
+                "model": {"name": model},
+                "features": {
+                    "type": feature_set,
+                    "n_features": n_features,
+                },
+                "feature_selection": {"method": fs_method},
+                "hpo": {"mode": hpo_mode} if hpo_mode else {},
+            }
+            if clustering_method:
+                params["feature_selection"]["clustering"] = {"method": clustering_method}
+                if gs is not None:
+                    params["feature_selection"]["clustering"]["group_size"] = gs
+            
+            engine = NamingEngine(naming_config)
+            exp_name = engine.generate_name(params)
+        except Exception as e:
+            warnings.warn(f"NamingEngine failed: {e}. Using legacy name generation.")
+            naming_config = None  # Fall back to legacy logic
+    
+    # Legacy hard-coded logic (backward compatibility)
+    if naming_config is None:
+        exp_name = f"{ds}-{asset_id}_{model}_n-{n_features}_{feature_set}"
+        if fs_method == "CSFS":
+            gs_str = f"-gs{gs}" if gs is not None else ""
+            exp_name += f"_csfs-{clustering_method}{gs_str}_{hpo_mode}"
+        else:
+            exp_name += f"_{fs_method}"
+    
+    # Generate args (always uses same logic regardless of naming config)
     exp_args = f"--domain {ds} --asset_id {asset_id} --model {model} --features {feature_set} --n_features {n_features} --fs_method {fs_method}"
     if fs_method == "CSFS":
-        gs_str = f"-gs{gs}" if gs is not None else ""
         gs_param = f" --group_size {gs}" if gs is not None else ""
-        exp_name += f"_csfs-{clustering_method}{gs_str}_{hpo_mode}"
         exp_args += f"--hpo_mode {hpo_mode} --fast_mode --direction backward --clustering_method {clustering_method}{gs_param}"
     else:
         assert clustering_method is None
         assert gs is None
         assert hpo_mode is None
-        exp_name += f"_{fs_method}"
 
     return exp_name, exp_args
 
@@ -233,6 +287,17 @@ class DataExtractor:
                         "fast_stops": _get_fast_stops,
                         "total_iterations": _get_total_iterations, }
 
+    @staticmethod
+    def _read_exp_arg(exp_args, key: str):
+        if isinstance(exp_args, dict):
+            return exp_args.get(key)
+        if hasattr(exp_args, "get"):
+            try:
+                return exp_args.get(key)
+            except Exception:
+                pass
+        return getattr(exp_args, key, None)
+
     def __init__(self, ds_tuples: list[tuple] = None,
                  models: list[str] = None,
                  hpo_modes: list[str] = None,
@@ -268,7 +333,7 @@ class DataExtractor:
             exp_args = fslogger.fetch_object("exp_args")
             for column in columns:
                 if column in self.ARGS_COLS:
-                    res[column].append(getattr(exp_args, column))
+                    res[column].append(self._read_exp_arg(exp_args, column))
                 else:
                     res[column].append(self._load(column, fslogger, aggregation_method))
 
