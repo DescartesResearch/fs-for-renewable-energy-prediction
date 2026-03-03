@@ -21,8 +21,9 @@ from utils.misc import limit_memory, flatten_dict
 from config.constants import Constants
 
 # Create logging logger (not to be confused with FSLogger used for experiment artifact and results logging)
+LOGLEVEL = os.environ.get("LOGLEVEL", "INFO").upper()
 root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
+root_logger.setLevel(LOGLEVEL)
 if root_logger.hasHandlers():
     root_logger.handlers.clear()
 
@@ -185,12 +186,12 @@ def validate_experiment_args(cfg: DictConfig):
             f"Invalid model: {cfg.model.name}. Must be in {Constants.MODELS}."
         )
 
-    if cfg.features.type not in Constants.FEATURE_SET_TYPES:
+    if cfg.dataset.type not in Constants.FEATURE_SET_TYPES:
         raise ValueError(
-            f"Invalid feature set type: {cfg.features.type}. Must be in {Constants.FEATURE_SET_TYPES}."
+            f"Invalid feature set type: {cfg.dataset.type}. Must be in {Constants.FEATURE_SET_TYPES}."
         )
 
-    if cfg.features.n_features is None or cfg.features.n_features <= 0:
+    if cfg.feature_selection.n_features is None or cfg.feature_selection.n_features <= 0:
         raise ValueError("Number of features to select must be a positive integer.")
 
     if cfg.random_seed is None:
@@ -240,7 +241,7 @@ def run_experiment(cfg: DictConfig):
     validate_experiment_args(cfg)
 
     if cfg.get("dry_run", False):
-        logging.info(
+        logging.debug(
             "Dry run mode enabled. Validating experiment arguments and exiting without execution."
         )
         sys.exit(0)
@@ -258,7 +259,7 @@ def run_experiment(cfg: DictConfig):
             shutil.rmtree(fslogger.log_dir)
             fslogger.log_dir.mkdir(parents=True, exist_ok=True)
         elif cfg.feature_selection.resume_at_iteration is not None:
-            logging.info(
+            logging.debug(
                 f"Resuming experiment {cfg['name']} at iteration {cfg.feature_selection.resume_at_iteration}."
             )
         else:
@@ -284,7 +285,7 @@ def run_experiment(cfg: DictConfig):
     _datetimes = dataset_df["Timestamp"]
 
     # Only keep features according to the selected feature set type
-    if cfg.features.type == "forecast_available":
+    if cfg.dataset.type == "forecast_available":
         inclusion_tags = {"forecast_available"}
         exclusion_tags = {"meta", "target", "power_proxy", "system_state"}
     else:
@@ -304,7 +305,7 @@ def run_experiment(cfg: DictConfig):
     )
 
     _X = DataFrameProcessor.filter_columns(features)(dataset_df)
-    logging.info(
+    logging.debug(
         f"X: Removed following meta, target, ... columns: {dataset_df.columns.difference(_X.columns)}"
     )
     _y = DataFrameProcessor.filter_columns(
@@ -314,9 +315,9 @@ def run_experiment(cfg: DictConfig):
         )
     )(dataset_df)
 
-    logging.info("Dataset loaded with shape X: {}, y: {}".format(_X.shape, _y.shape))
-    logging.info("Features used: {}".format(_X.columns.tolist()))
-    logging.info("Target used: {}".format(_y.columns.tolist()))
+    logging.debug("Dataset loaded with shape X: {}, y: {}".format(_X.shape, _y.shape))
+    logging.debug("Features used: {}".format(_X.columns.tolist()))
+    logging.debug("Target used: {}".format(_y.columns.tolist()))
 
     split_indices = DataUtils.get_time_split_indices(
         _datetimes,
@@ -325,8 +326,8 @@ def run_experiment(cfg: DictConfig):
     )
 
     for split_idx, split_typ in zip(split_indices, ["Train+Validation", "Test"]):
-        logging.info(f"{split_typ}: index=[{split_idx[0]}, {split_idx[-1]}]")
-        logging.info(
+        logging.debug(f"{split_typ}: index=[{split_idx[0]}, {split_idx[-1]}]")
+        logging.debug(
             f"{split_typ}: Datetime=[{_datetimes.iloc[split_idx[0]]}, {_datetimes.iloc[split_idx[-1]]}]"
         )
 
@@ -438,7 +439,7 @@ def run_experiment(cfg: DictConfig):
 
     feature_selector = get_feature_selector(fslogger, fs_config)
 
-    logging.info("Start feature selection process.")
+    logging.debug("Start feature selection process.")
     fs_start_time = time.perf_counter()
     feature_selector.fit(
         X=X_train_val.copy(),
@@ -446,7 +447,7 @@ def run_experiment(cfg: DictConfig):
     )
     fs_end_time = time.perf_counter()
     fs_runtime = fs_end_time - fs_start_time
-    logging.info(
+    logging.debug(
         f"Feature selection finished in {str(datetime.timedelta(seconds=fs_runtime))}. Selected features: {feature_selector.get_feature_names_out()}"
     )
 
@@ -455,18 +456,18 @@ def run_experiment(cfg: DictConfig):
     # fslogger.save_object("csfs", feature_selector)
     fslogger.save_object("feature_names_out", feature_selector.get_feature_names_out())
 
-    logging.info("Start fitting on test set.")
+    logging.debug("Start fitting on test set.")
     test_fit_kwargs = automl_settings.copy()
     test_fit_kwargs["retrain_full"] = True
     if cfg.warm_start.enabled:
-        logging.info("Start warmup")
+        logging.debug("Start warmup")
         warmup_est = get_automl_with_registered_models(models_to_register=[model_name])
         warmup_est.fit(
             X_train_val.copy().loc[:, feature_selector.get_feature_names_out()],
             y_train_val.copy().values.ravel(),
             **automl_ws_settings,
         )
-        logging.info("Finished warmup.")
+        logging.debug("Finished warmup.")
         test_fit_kwargs["starting_points"] = warmup_est.best_config_per_estimator
 
     est = get_automl_with_registered_models(models_to_register=[model_name])
@@ -480,7 +481,7 @@ def run_experiment(cfg: DictConfig):
     )
     test_fit_end_time = time.perf_counter()
     test_fit_duration = test_fit_end_time - test_fit_start_time
-    logging.info(
+    logging.debug(
         f"Test fit finished in {str(datetime.timedelta(seconds=test_fit_duration))}."
     )
     test_results = dict()

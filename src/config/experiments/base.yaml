@@ -19,15 +19,11 @@ dry_run: false
 dataset:
   domain: ???  # Required: wind or pv
   asset_id: ???  # Required
+  type: ???  # forecast_available or digital_twin
 
 # Model configuration
 model:
   name: ???  # Required: mlp, lgbm, gp, xgboost, rf
-
-# Feature configuration
-features:
-  type: ???  # forecast_available or digital_twin
-  n_features: ???  # Required
 
 # Feature selection
 feature_selection:
@@ -39,6 +35,7 @@ feature_selection:
   val_ratio: 0.333333
   fast_mode: true
   resume_at_iteration: null
+  n_features: ???  # Required
 
 # Hyperparameter optimization
 hpo:

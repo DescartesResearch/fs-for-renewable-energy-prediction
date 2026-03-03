@@ -15,7 +15,7 @@ class PVODataset(object):
         self.qc_flag = qc
         if self.tz not in ["UTC", "UTC+8"]:
                 raise ValueError("Check Timezone.")
-        print("Welcome to PVODataset (PVOD).")
+        # print("Welcome to PVODataset (PVOD).")
         if self.qc_flag:
             print("Quality control is set to True.")
 
