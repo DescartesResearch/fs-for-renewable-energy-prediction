@@ -38,7 +38,8 @@ class Constants:
     HPO_MODES = ['off', 'on', 'per_iteration', 'per_feature_set']
     CLUSTERING_METHODS = ["correlation", "random", "feature_importance", "singletons"]
     METRICS = {
-        # metric to be used as primary score (higher is better)
+        # metrics to be used as primary score (higher is better)
+        "neg_rmse": ("rmse", "-"),
         "neg_mse": ("mse", "-"),
         # additional metrics for evaluation
         "mse": ("mse", "+"),
