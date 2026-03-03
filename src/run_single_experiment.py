@@ -21,7 +21,7 @@ from utils.misc import limit_memory, flatten_dict
 from config.constants import Constants
 
 # Create logging logger (not to be confused with FSLogger used for experiment artifact and results logging)
-LOGLEVEL = os.environ.get("LOGLEVEL", "INFO").upper()
+LOGLEVEL = "DEBUG"  # os.environ.get("LOGLEVEL", "INFO").upper()
 root_logger = logging.getLogger()
 root_logger.setLevel(LOGLEVEL)
 if root_logger.hasHandlers():
