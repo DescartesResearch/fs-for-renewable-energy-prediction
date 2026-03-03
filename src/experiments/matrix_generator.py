@@ -11,7 +11,6 @@ from pathlib import Path
 from itertools import product
 import logging
 
-from .constraint_validator import ConstraintValidator
 from .condition_utils import (
     get_nested_value,
     set_nested_value,
