@@ -28,6 +28,7 @@ dependencies = [
     "scipy>=1.16.1",
     "scipy-stubs==1.16.2.4",
     "seaborn>=0.13.2",
+    "statsmodels>=0.14.5",
     "torch>=2.7.1",
     "tqdm>=4.67.1",
     "xgboost>=3.0.3",
