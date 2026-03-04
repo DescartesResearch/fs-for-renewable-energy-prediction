@@ -54,8 +54,7 @@ class ExperimentUtils:
 
         # Apply name patterns if needed
         if include_pattern or exclude_pattern:
-            generator = MatrixGenerator()
-            names = [generator.generate_experiment_name(e) for e in results]
+            names = [e["name"] for e in results]
 
             filtered_results = []
             for name, exp in zip(names, results):
