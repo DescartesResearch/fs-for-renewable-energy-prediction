@@ -161,16 +161,12 @@ class ExperimentUtils:
             limit: Maximum number to display (None for all)
             show_params: If True, show all parameters for each experiment
         """
-        from .matrix_generator import MatrixGenerator
-
-        generator = MatrixGenerator()
-
         for i, exp in enumerate(experiments):
             if limit is not None and i >= limit:
                 print(f"... and {len(experiments) - limit} more")
                 break
 
-            name = generator.generate_experiment_name(exp)
+            name = exp["name"]
             if show_params:
                 print(f"{i:4d}. {name}")
                 for key, value in sorted(exp.items()):
@@ -196,15 +192,13 @@ class ExperimentUtils:
         Returns:
             Exported content as string (if filepath is None)
         """
-        from .matrix_generator import MatrixGenerator
         import json
 
-        generator = MatrixGenerator()
 
         if output_format == "txt":
             lines = []
             for i, exp in enumerate(experiments):
-                name = generator.generate_experiment_name(exp)
+                name = exp["name"]
                 lines.append(f"{i:04d} {name}")
             content = "\n".join(lines)
 
