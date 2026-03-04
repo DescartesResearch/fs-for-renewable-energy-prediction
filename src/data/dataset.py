@@ -24,21 +24,25 @@ class BaseDataset(ABC):
         diff = data.columns.difference(list(self.get_feature_tags().keys()))
         if len(diff) > 0:
             raise ValueError(
-                f"No tags defined for the following features: {diff}. Empty tag sets are also allowed.")
+                f"No tags defined for the following features: {diff}. Empty tag sets are also allowed."
+            )
 
         # Warnings:
         nan_count = sum(data.isnull().sum().values)
         if nan_count > 0:
             warnings.warn(f"Dataset contains {nan_count} NaN values found in it.")
 
-        obj_cols = data.select_dtypes(include='object').columns.tolist()
+        obj_cols = data.select_dtypes(include="object").columns.tolist()
         if len(obj_cols) > 0:
-            warnings.warn(f"The following columns have dtype 'object'. Please check if this is intended: {obj_cols}")
+            warnings.warn(
+                f"The following columns have dtype 'object'. Please check if this is intended: {obj_cols}"
+            )
 
         diff = data.columns.difference(list(self.get_diagram_feature_name_map().keys()))
         if len(diff) > 0:
             warnings.warn(
-                f"Following features not included in diagram name map: {diff}. Please add them if you want to create the feature clusters diagram later.")
+                f"Following features not included in diagram name map: {diff}. Please add them if you want to create the feature clusters diagram later."
+            )
 
         return data
 
@@ -67,12 +71,11 @@ class BaseDataset(ABC):
         pass
 
     @abstractmethod
-    def get_task(self) -> Literal['regression', 'classification']:
+    def get_task(self) -> Literal["regression", "classification"]:
         pass
 
 
 class WindDataset(BaseDataset):
-
     def __init__(self, config: dict, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
         self.failure_period_length = config.get("failure_period_length", 21)
@@ -80,10 +83,6 @@ class WindDataset(BaseDataset):
         self.turbine_id = config["asset_id"]
         self.remove_zero_var_cols = config.get("remove_zero_var_cols", False)
         self.additional_feature_aggs = config.get("additional_feature_aggs", None)
-        self.features = config["features"]
-        if self.features not in ["forecast_available", "digital_twin"]:
-            raise ValueError(
-                f"Unknown feature mode for the WindDataset: {self.features}. Must be 'forecast_available' or 'digital_twin'")
 
     def get_dataframe(self) -> pd.DataFrame:
         _failures_df, scada_and_metmast_data = load_edp_data(
@@ -108,7 +107,6 @@ class WindDataset(BaseDataset):
             "Timestamp": "Timestamp",
             "DayOfYear": "DayOfYear",
             "MinuteOfDay": "MinuteOfDay",
-
             # Generator
             "Gen_RPM_Max": "Generator RPM_Max",
             "Gen_RPM_Min": "Generator RPM_Min",
@@ -120,13 +118,11 @@ class WindDataset(BaseDataset):
             "Gen_Phase2_Temp_Avg": "Generator Phase 2 Temperature_Avg",
             "Gen_Phase3_Temp_Avg": "Generator Phase 3 Temperature_Avg",
             "Gen_SlipRing_Temp_Avg": "Generator Slip Ring Temperature_Avg",
-
             # Rotor
             "Rtr_RPM_Max": "Rotor RPM_Max",
             "Rtr_RPM_Min": "Rotor RPM_Min",
             "Rtr_RPM_Avg": "Rotor RPM_Avg",
             "Rtr_RPM_Std": "Rotor RPM_Std",
-
             # Ambient / Wind
             "Amb_WindSpeed_Max": "Ambient Wind Speed_Max",
             "Amb_WindSpeed_Min": "Ambient Wind Speed_Min",
@@ -136,19 +132,16 @@ class WindDataset(BaseDataset):
             "Amb_WindDir_Relative_Avg": "Relative Wind Direction_Avg",
             "Amb_WindDir_Abs_Avg": "Absolute Wind Direction_Avg",
             "Amb_Temp_Avg": "Ambient Temperature 2_Avg",
-
             # Deviated Quantities - computed with OpenOA
             "Turbulence Intensity": "Turbulence Intensity",
             "Turbulence Intensity 1": "Turbulence Intensity 1",
             "Turbulence Intensity 2": "Turbulence Intensity 2",
             "Wind Shear": "Wind Shear",
-
             # Blade Pitch
             "Blds_PitchAngle_Min": "Blade Pitch Angle_Min",
             "Blds_PitchAngle_Max": "Blade Pitch Angle_Max",
             "Blds_PitchAngle_Avg": "Blade Pitch Angle_Avg",
             "Blds_PitchAngle_Std": "Blade Pitch Angle_Std",
-
             # Power Grid
             "Grd_Prod_Pwr_Avg": "Grid Produced Power_Avg",
             "Grd_Prod_Pwr_Max": "Grid Produced Power_Max",
@@ -183,19 +176,16 @@ class WindDataset(BaseDataset):
             "Grd_RtrInvPhase2_Temp_Avg": "Grid Rotor Inverter Phase 2 Temperature_Avg",
             "Grd_RtrInvPhase3_Temp_Avg": "Grid Rotor Inverter Phase 3 Temperature_Avg",
             "Grd_Busbar_Temp_Avg": "Grid Busbar Temperature_Avg",
-
             # Transformer & Inverter
             "HVTrafo_Phase1_Temp_Avg": "High Voltage Transformer Phase 1 Temperature_Avg",
             "HVTrafo_Phase2_Temp_Avg": "High Voltage Transformer Phase 2 Temperature_Avg",
             "HVTrafo_Phase3_Temp_Avg": "High Voltage Transformer Phase 3 Temperature_Avg",
-
             # Control cabinet
             "Cont_Top_Temp_Avg": "Control Cabinet Top Temperature_Avg",
             "Cont_Hub_Temp_Avg": "Control Hub Temperature_Avg",
             "Cont_VCP_Temp_Avg": "VCP Temperature_Avg",
             "Cont_VCP_ChokcoilTemp_Avg": "VCP Choke Coil Temperature_Avg",
             "Cont_VCP_WtrTemp_Avg": "VCP Water Temperature_Avg",
-
             # Others
             "Hyd_Oil_Temp_Avg": "Hydraulic Oil Temperature_Avg",
             "Gear_Oil_Temp_Avg": "Gear Oil Temperature_Avg",
@@ -203,7 +193,6 @@ class WindDataset(BaseDataset):
             "Nac_Temp_Avg": "Nacelle Temperature_Avg",
             "Nac_Direction_Avg": "Nacelle Direction_Avg",
             "Spin_Temp_Avg": "Spinner Temperature_Avg",
-
             # Production (possibly turbine-specific)
             "Prod_LatestAvg_ActPwrGen0": "Active Power Generator 0_Avg",
             "Prod_LatestAvg_ActPwrGen1": "Active Power Generator 1_Avg",
@@ -213,7 +202,6 @@ class WindDataset(BaseDataset):
             "Prod_LatestAvg_ReactPwrGen1": "Reactive Power Generator 1_Avg",
             "Prod_LatestAvg_ReactPwrGen2": "Reactive Power Generator 2_Avg",
             "Prod_LatestAvg_TotReactPwr": "Total Reactive Power_Avg",
-
             # Alternative Wind Measurements
             "Min_Windspeed1": "Wind Speed 1_Min",  # @80m
             "Max_Windspeed1": "Wind Speed 1_Max",
@@ -223,16 +211,13 @@ class WindDataset(BaseDataset):
             "Max_Windspeed2": "Wind Speed 2_Max",
             "Avg_Windspeed2": "Wind Speed 2_Avg",
             "Var_Windspeed2": "Wind Speed 2_Var",
-
             # "Min_Winddirection2": "Wind Direction 2_Min",
             # "Max_Winddirection2": "Wind Direction 2_Max",
             # "Avg_Winddirection2": "Wind Direction 2_Avg",
             # "Var_Winddirection2": "Wind Direction 2_Var",
-
             "Min_AmbientTemp": "Ambient Temperature_Min",
             "Max_AmbientTemp": "Ambient Temperature_Max",
             "Avg_AmbientTemp": "Ambient Temperature_Avg",
-
             # Humidity & Precipitation
             "Min_Pressure": "Atmospheric Pressure_Min",
             "Max_Pressure": "Atmospheric Pressure_Max",
@@ -243,12 +228,10 @@ class WindDataset(BaseDataset):
             "Min_Precipitation": "Precipitation_Min",
             "Max_Precipitation": "Precipitation_Max",
             "Avg_Precipitation": "Precipitation_Avg",
-
             # Rain Detection
             "Avg_Raindetection": "Rain Detection_Avg",
             "Min_Raindetection": "Rain Detection_Min",
             "Max_Raindetection": "Rain Detection_Max",
-
             # Anemometers
             "Anemometer1_Freq": "Anemometer 1 Frequency",  # Anemometer 1 height: 80m
             "Anemometer1_Offset": "Anemometer 1 Offset",
@@ -260,18 +243,16 @@ class WindDataset(BaseDataset):
             "Anemometer2_CorrGain": "Anemometer 2 Correction Gain",
             "Anemometer2_CorrOffset": "Anemometer 2 Correction Offset",
             "Anemometer2_Avg_Freq": "Anemometer 2 Frequency_Avg",
-
             # Pressure sensor
             "Pressure_Avg_Freq": "Pressure Sensor Frequency_Avg",
             "DistanceAirPress": "Distance to Air Pressure Sensor",
             "AirRessureSensorZeroOffset": "Air Pressure Sensor Zero Offset",
-
             # Labels & Meta
             "Component": "Component",
             "Timestamp_failure": "Failure Timestamp",
             "Remarks": "Remarks",
             "rul": "RUL",
-            "impending_failure": "Impending Failure"
+            "impending_failure": "Impending Failure",
         }
 
     def get_feature_tags(self) -> dict:
@@ -284,10 +265,8 @@ class WindDataset(BaseDataset):
             "Component": {"meta"},
             "Failure Timestamp": {"meta"},
             "Remarks": {"meta"},
-
             # Target
             "Grid Produced Power": {"target"},
-
             # Datetime
             "DayOfYear": {"circular", "forecast_available"},
             "DayOfYear_sin": {"cyclical_encoding", "forecast_available"},
@@ -295,7 +274,6 @@ class WindDataset(BaseDataset):
             "MinuteOfDay": {"circular", "forecast_available"},
             "MinuteOfDay_sin": {"cyclical_encoding", "forecast_available"},
             "MinuteOfDay_cos": {"cyclical_encoding", "forecast_available"},
-
             # Power Proxies (even if not the target)
             "Total Active Power": {"power_proxy"},
             "Active Power Generator 0": {"power_proxy"},
@@ -317,12 +295,14 @@ class WindDataset(BaseDataset):
             "Grid Possible Inductive Power": {"power_proxy"},
             "Grid Possible Capacitive Power": {"power_proxy"},
             "Estimated Ambient Wind Speed": {"power_proxy"},
-
             # Forecast-available environmental features
             "Ambient Wind Speed": {"forecast_available"},
             # "Ambient Wind Speed_Std": {"forecast_available"},
             # "Estimated Ambient Wind Speed": {"forecast_available"},
-            "Absolute Wind Direction": {"forecast_available", "circular"},  # from 0° to 360°
+            "Absolute Wind Direction": {
+                "forecast_available",
+                "circular",
+            },  # from 0° to 360°
             "Absolute Wind Direction_sin": {"forecast_available", "cyclical_encoding"},
             "Absolute Wind Direction_cos": {"forecast_available", "cyclical_encoding"},
             "Ambient Temperature": {"forecast_available"},
@@ -334,7 +314,6 @@ class WindDataset(BaseDataset):
             "Humidity": {"forecast_available"},
             "Precipitation": {"forecast_available"},
             "Rain Detection": {"forecast_available"},
-
             # Anemometers (forecast-relevant if derived from sensors upstream)
             "Anemometer 1 Frequency": {"forecast_available"},
             "Anemometer 1 Offset": {"forecast_available"},
@@ -346,19 +325,19 @@ class WindDataset(BaseDataset):
             "Anemometer 2 Correction Offset": {"forecast_available"},
             "Distance to Air Pressure Sensor": {"forecast_available"},
             "Air Pressure Sensor Zero Offset": {"forecast_available"},
-
             # System-state environmental features
-            "Relative Wind Direction": {"system_state", "circular"},  # from -180° to 180°
+            "Relative Wind Direction": {
+                "system_state",
+                "circular",
+            },  # from -180° to 180°
             "Relative Wind Direction_sin": {"system_state", "cyclical_encoding"},
             "Relative Wind Direction_cos": {"system_state", "cyclical_encoding"},
             "Pressure Sensor Frequency": {"system_state"},
-
             # Deviated Quantities - computed with OpenOA
             "Turbulence Intensity": {"forecast_available"},
             "Turbulence Intensity 1": {"forecast_available"},
             "Turbulence Intensity 2": {"forecast_available"},
             "Wind Shear": {"forecast_available"},
-
             # system state features (unflagged → usable in Task 1 but excluded in Task 2)
             "Generator RPM": {"system_state"},
             "Generator Bearing Temperature": {"system_state"},
@@ -390,7 +369,7 @@ class WindDataset(BaseDataset):
             "Grid Frequency": {"system_state"},
             "Nacelle Direction": {"system_state", "circular"},
             "Nacelle Direction_sin": {"system_state", "cyclical_encoding"},
-            "Nacelle Direction_cos": {"system_state", "cyclical_encoding"}
+            "Nacelle Direction_cos": {"system_state", "cyclical_encoding"},
         }
 
     def get_cyclical_value_ranges(self) -> dict[str, tuple[float, float]]:
@@ -506,33 +485,52 @@ class WindDataset(BaseDataset):
 
     def get_base_pipeline(self):
         pipeline = ProcessingPipeline()
-        pipeline.apply(DataFrameProcessor.filter_columns(get_features_by_tags(
-            self.get_feature_tags(), tags_exclude={"power_proxy"}
-        )))
+        pipeline.apply(
+            DataFrameProcessor.filter_columns(
+                get_features_by_tags(
+                    self.get_feature_tags(), tags_exclude={"power_proxy"}
+                )
+            )
+        )
         pipeline.apply(DataFrameProcessor.drop_duplicates())
         pipeline.apply(DataFrameProcessor.drop_na_columns(p_thresh=0.95))
         pipeline.apply(DataFrameProcessor.drop_na_rows())
         pipeline.apply(
-            lambda df: self.add_wind_shear(df, ("Wind Speed 1", "Wind Speed 2"), anemometer_heights=(80, 77)))
+            lambda df: self.add_wind_shear(
+                df, ("Wind Speed 1", "Wind Speed 2"), anemometer_heights=(80, 77)
+            )
+        )
         pipeline.apply(DataFrameProcessor.drop_na_columns(p_thresh=0.95))
         pipeline.apply(DataFrameProcessor.drop_na_rows())
-        pipeline.apply(DataFrameProcessor.drop_inf_rows(
-            cols=["Turbulence Intensity 2"]))
-        pipeline.apply(DataFrameProcessor.remove_low_variance_columns(
-            variance_threshold=1e-10,
-            cols=get_features_by_tags(self.get_feature_tags(), tags_exclude={"meta", "target", "power_proxy"})
-        ))
         pipeline.apply(
-            DataFrameProcessor.add_cyclical_encodings(self.get_feature_tags(), self.get_cyclical_value_ranges()))
+            DataFrameProcessor.drop_inf_rows(cols=["Turbulence Intensity 2"])
+        )
+        pipeline.apply(
+            DataFrameProcessor.remove_low_variance_columns(
+                variance_threshold=1e-10,
+                cols=get_features_by_tags(
+                    self.get_feature_tags(),
+                    tags_exclude={"meta", "target", "power_proxy"},
+                ),
+            )
+        )
+        pipeline.apply(
+            DataFrameProcessor.add_cyclical_encodings(
+                self.get_feature_tags(), self.get_cyclical_value_ranges()
+            )
+        )
         pipeline.apply(DataFrameProcessor.sort(by_columns="Timestamp", ascending=True))
         return pipeline
 
-    def get_task(self) -> Literal['regression', 'classification']:
-        return 'regression'
+    def get_task(self) -> Literal["regression", "classification"]:
+        return "regression"
 
     @staticmethod
-    def add_wind_shear(df: pd.DataFrame, wind_speed_colnames: tuple[str, str],
-                       anemometer_heights: tuple[float, float]) -> pd.DataFrame:
+    def add_wind_shear(
+        df: pd.DataFrame,
+        wind_speed_colnames: tuple[str, str],
+        anemometer_heights: tuple[float, float],
+    ) -> pd.DataFrame:
         # The problem with Wind Shear computation: There are zero wind speed entries, and due to log calculations, these are problematic and numerically unstable.
         # So we replace zero values with a small epsilon
         eps = 0.1
@@ -544,14 +542,16 @@ class WindDataset(BaseDataset):
             u1 = np.where(u1 == 0, eps, u1)
 
         wind_shear = compute_shear(
-            data=pd.DataFrame({
-                "u0": u0,
-                "u1": u1,
-            }),
+            data=pd.DataFrame(
+                {
+                    "u0": u0,
+                    "u1": u1,
+                }
+            ),
             ws_heights={
                 "u0": anemometer_heights[0],
                 "u1": anemometer_heights[1],
-            }
+            },
         )  # => np.ndarray
 
         # If the wind speed difference at the two heights is smaller than the sum of their stds, the wind shear is set to 0
@@ -581,14 +581,12 @@ class SolarDataset(BaseDataset):
             "date_time": "Timestamp",
             "DayOfYear": "DayOfYear",
             "MinuteOfDay": "MinuteOfDay",
-
             "dawn": "Dawn",
             "sunrise": "Sunrise",
             "noon": "Noon",
             "sunset": "Sunset",
             "dusk": "Dusk",
             "is_daytime": "is_daytime",
-
             "Station_ID": "Station ID",
             "Capacity": "Capacity",
             "PV_Technology": "PV Technology",
@@ -602,9 +600,7 @@ class SolarDataset(BaseDataset):
             "Longitude": "Longitude",
             "Latitude": "Latitude",
             "Altitude": "Altitude",
-
             "power": "Power",
-
             "nwp_globalirrad": "NWP Global Irradiance",
             "nwp_directirrad": "NWP Direct Irradiance",
             "nwp_temperature": "NWP Temperature",
@@ -612,14 +608,12 @@ class SolarDataset(BaseDataset):
             "nwp_windspeed": "NWP Wind Speed",
             "nwp_winddirection": "NWP Wind Direction",
             "nwp_pressure": "NWP Pressure",
-
             "lmd_totalirrad": "LMD Global Irradiance",
             "lmd_diffuseirrad": "LMD Diffuse Irradiance",
             "lmd_temperature": "LMD Temperature",
             "lmd_pressure": "LMD Pressure",
             "lmd_winddirection": "LMD Wind Direction",
             "lmd_windspeed": "LMD Wind Speed",
-
             # Solar position features (see: https://pvlib-python.readthedocs.io/en/stable/reference/generated/pvlib.location.Location.get_solarposition.html)
             "nwp_apparent_zenith": "NWP Apparent Zenith",
             "nwp_zenith": "NWP Zenith",
@@ -627,30 +621,24 @@ class SolarDataset(BaseDataset):
             "nwp_elevation": "NWP Elevation",
             "nwp_azimuth": "NWP Azimuth",
             "nwp_equation_of_time": "NWP Equation of Time",
-
             "lmd_apparent_zenith": "LMD Apparent Zenith",
             "lmd_zenith": "LMD Zenith",
             "lmd_apparent_elevation": "LMD Apparent Elevation",
             "lmd_elevation": "LMD Elevation",
             "lmd_azimuth": "LMD Azimuth",
             "lmd_equation_of_time": "LMD Equation of Time",
-
             # Clear sky estimates (see: https://pvlib-python.readthedocs.io/en/stable/reference/generated/pvlib.location.Location.get_clearsky.html)
             "nwp_ghi": "NWP GHI",
             "nwp_dni": "NWP DNI",
             "nwp_dhi": "NWP DHI",
-
             "lmd_ghi": "LMD GHI",
             "lmd_dni": "LMD DNI",
             "lmd_dhi": "LMD DHI",
-
             # See: https://pvlib-python.readthedocs.io/en/stable/reference/generated/pvlib.location.Location.get_airmass.html
             "nwp_airmass_relative": "NWP Relative Airmass",
             "nwp_airmass_absolute": "NWP Absolute Airmass",
-
             "lmd_airmass_relative": "LMD Relative Airmass",
             "lmd_airmass_absolute": "LMD Absolute Airmass",
-
         }
 
     def get_feature_tags(self) -> dict:
@@ -671,10 +659,8 @@ class SolarDataset(BaseDataset):
             "Longitude_cos": {"meta", "cyclical_encoding"},
             "Latitude": {"meta"},  # explicitly not circular
             "Altitude": {"meta"},
-
             # Target
             "Power": {"target"},
-
             # Datetime
             "Timestamp": {"meta"},
             "DayOfYear": {"circular", "forecast_available"},
@@ -689,7 +675,6 @@ class SolarDataset(BaseDataset):
             "Sunset": {"meta"},
             "Dusk": {"meta"},
             "is_daytime": {"meta"},
-
             # Forecast-available environmental features
             "NWP Global Irradiance": {"forecast_available"},
             "NWP Direct Irradiance": {"forecast_available"},
@@ -700,7 +685,6 @@ class SolarDataset(BaseDataset):
             "NWP Wind Direction_sin": {"forecast_available", "cyclical_encoding"},
             "NWP Wind Direction_cos": {"forecast_available", "cyclical_encoding"},
             "NWP Pressure": {"forecast_available"},
-
             "LMD Global Irradiance": {"system_state"},
             "LMD Diffuse Irradiance": {"system_state"},
             "LMD Temperature": {"system_state"},
@@ -709,7 +693,6 @@ class SolarDataset(BaseDataset):
             "LMD Wind Direction_sin": {"system_state", "cyclical_encoding"},
             "LMD Wind Direction_cos": {"system_state", "cyclical_encoding"},
             "LMD Wind Speed": {"system_state"},
-
             # pvlib features (see: https://pvlib-python.readthedocs.io/en/stable/user_guide/extras/nomenclature.html)
             # based on numerical weather prediction (NWP) data
             "NWP Absolute Airmass": {"forecast_available"},
@@ -723,7 +706,6 @@ class SolarDataset(BaseDataset):
             "NWP Azimuth": {"forecast_available", "circular"},
             "NWP Elevation": {"forecast_available", "circular"},
             "NWP Zenith": {"forecast_available", "circular"},
-
             "NWP Azimuth_sin": {"forecast_available", "cyclical_encoding"},
             "NWP Azimuth_cos": {"forecast_available", "cyclical_encoding"},
             "NWP Elevation_sin": {"forecast_available", "cyclical_encoding"},
@@ -734,7 +716,6 @@ class SolarDataset(BaseDataset):
             "NWP Apparent Zenith_cos": {"forecast_available", "cyclical_encoding"},
             "NWP Apparent Elevation_sin": {"forecast_available", "cyclical_encoding"},
             "NWP Apparent Elevation_cos": {"forecast_available", "cyclical_encoding"},
-
             # based on local measurements (LMD) data
             "LMD Absolute Airmass": {"system_state"},
             "LMD Relative Airmass": {"system_state"},
@@ -747,7 +728,6 @@ class SolarDataset(BaseDataset):
             "LMD Azimuth": {"system_state", "circular"},
             "LMD Elevation": {"system_state", "circular"},
             "LMD Zenith": {"system_state", "circular"},
-
             "LMD Azimuth_sin": {"system_state", "cyclical_encoding"},
             "LMD Azimuth_cos": {"system_state", "cyclical_encoding"},
             "LMD Elevation_sin": {"system_state", "cyclical_encoding"},
@@ -767,14 +747,12 @@ class SolarDataset(BaseDataset):
             "LMD Wind Direction": (0, 360),
             "MinuteOfDay": (0, 24 * 60 - 1),
             "DayOfYear": (1, 366),
-
             # pvlib features
             "LMD Azimuth": (0, 360),
             "LMD Elevation": (0, 90),
             "LMD Apparent Elevation": (0, 90),
             "LMD Zenith": (0, 90),
             "LMD Apparent Zenith": (0, 90),
-
             "NWP Azimuth": (0, 360),
             "NWP Elevation": (0, 90),
             "NWP Apparent Elevation": (0, 90),
@@ -784,120 +762,122 @@ class SolarDataset(BaseDataset):
 
     def get_base_pipeline(self):
         pipeline = ProcessingPipeline()
-        pipeline.apply(lambda df: df.loc[df['is_daytime'], :])
+        pipeline.apply(lambda df: df.loc[df["is_daytime"], :])
         pipeline.apply(DataFrameProcessor.drop_duplicates())
         pipeline.apply(DataFrameProcessor.drop_na_columns(p_thresh=0.95))
         pipeline.apply(DataFrameProcessor.drop_na_rows())
-        pipeline.apply(DataFrameProcessor.remove_low_variance_columns(
-            variance_threshold=1e-10,
-            cols=get_features_by_tags(self.get_feature_tags(), tags_exclude={"meta", "target", "power_proxy"})
-        ))
         pipeline.apply(
-            DataFrameProcessor.add_cyclical_encodings(self.get_feature_tags(), self.get_cyclical_value_ranges()))
+            DataFrameProcessor.remove_low_variance_columns(
+                variance_threshold=1e-10,
+                cols=get_features_by_tags(
+                    self.get_feature_tags(),
+                    tags_exclude={"meta", "target", "power_proxy"},
+                ),
+            )
+        )
+        pipeline.apply(
+            DataFrameProcessor.add_cyclical_encodings(
+                self.get_feature_tags(), self.get_cyclical_value_ranges()
+            )
+        )
         pipeline.apply(DataFrameProcessor.sort(by_columns="Timestamp", ascending=True))
         return pipeline
 
     def get_diagram_feature_name_map(self) -> dict[str, str]:
         return {
-            'Timestamp': 'Time',
-            'NWP Global Irradiance': 'NWP GI',
-            'NWP Direct Irradiance': 'NWP DI',
-            'NWP Temperature': 'NWP Temp',
-            'NWP Humidity': 'NWP Hum',
-            'NWP Wind Speed': 'NWP WS',
-            'NWP Wind Direction': 'NWP WD',
-            'NWP Pressure': 'NWP Press',
-            'LMD Global Irradiance': 'LMD GI',
-            'LMD Diffuse Irradiance': 'LMD DFI',
-            'LMD Temperature': 'LMD Temp',
-            'LMD Pressure': 'LMD Press',
-            'LMD Wind Direction': 'LMD WD',
-            'LMD Wind Speed': 'LMD WS',
-            'Power': 'Power',
-            'Station ID': 'Station',
-            'Capacity': 'Capacity',
-            'PV Technology': 'PV Tech',
-            'Panel Size': 'Panel Size',
-            'Module': 'Module',
-            'Inverters': 'Inverters',
-            'Layout': 'Layout',
-            'Panel Number': 'Panel #',
-            'Array Tilt': 'Tilt',
-            'Pyranometer': 'Pyranometer',
-            'Longitude': 'Lon',
-            'Latitude': 'Lat',
-            'Altitude': 'Alt',
-            'Dawn': 'Dawn',
-            'Sunrise': 'Sunrise',
-            'Noon': 'Noon',
-            'Sunset': 'Sunset',
-            'Dusk': 'Dusk',
-            'is_daytime': 'Daytime',
-            'DayOfYear': 'DoY',
-            'MinuteOfDay': 'MoD',
-
-            'NWP Apparent Zenith': 'NWP AppZen',
-            'NWP Zenith': 'NWP Zen',
-            'NWP Apparent Elevation': 'NWP AppEl',
-            'NWP Elevation': 'NWP El',
-            'NWP Azimuth': 'NWP Az',
-            'NWP Equation of Time': 'NWP EoT',
-            'NWP GHI': 'NWP GHI',
-            'NWP DNI': 'NWP DNI',
-            'NWP DHI': 'NWP DHI',
-            'NWP Relative Airmass': 'NWP RelAM',
-            'NWP Absolute Airmass': 'NWP AbsAM',
-
-            'LMD Apparent Zenith': 'LMD AppZen',
-            'LMD Zenith': 'LMD Zen',
-            'LMD Apparent Elevation': 'LMD AppEl',
-            'LMD Elevation': 'LMD El',
-            'LMD Azimuth': 'LMD Az',
-            'LMD Equation of Time': 'LMD EoT',
-            'LMD GHI': 'LMD GHI',
-            'LMD DNI': 'LMD DNI',
-            'LMD DHI': 'LMD DHI',
-            'LMD Relative Airmass': 'LMD RelAM',
-            'LMD Absolute Airmass': 'LMD AbsAM',
-
+            "Timestamp": "Time",
+            "NWP Global Irradiance": "NWP GI",
+            "NWP Direct Irradiance": "NWP DI",
+            "NWP Temperature": "NWP Temp",
+            "NWP Humidity": "NWP Hum",
+            "NWP Wind Speed": "NWP WS",
+            "NWP Wind Direction": "NWP WD",
+            "NWP Pressure": "NWP Press",
+            "LMD Global Irradiance": "LMD GI",
+            "LMD Diffuse Irradiance": "LMD DFI",
+            "LMD Temperature": "LMD Temp",
+            "LMD Pressure": "LMD Press",
+            "LMD Wind Direction": "LMD WD",
+            "LMD Wind Speed": "LMD WS",
+            "Power": "Power",
+            "Station ID": "Station",
+            "Capacity": "Capacity",
+            "PV Technology": "PV Tech",
+            "Panel Size": "Panel Size",
+            "Module": "Module",
+            "Inverters": "Inverters",
+            "Layout": "Layout",
+            "Panel Number": "Panel #",
+            "Array Tilt": "Tilt",
+            "Pyranometer": "Pyranometer",
+            "Longitude": "Lon",
+            "Latitude": "Lat",
+            "Altitude": "Alt",
+            "Dawn": "Dawn",
+            "Sunrise": "Sunrise",
+            "Noon": "Noon",
+            "Sunset": "Sunset",
+            "Dusk": "Dusk",
+            "is_daytime": "Daytime",
+            "DayOfYear": "DoY",
+            "MinuteOfDay": "MoD",
+            "NWP Apparent Zenith": "NWP AppZen",
+            "NWP Zenith": "NWP Zen",
+            "NWP Apparent Elevation": "NWP AppEl",
+            "NWP Elevation": "NWP El",
+            "NWP Azimuth": "NWP Az",
+            "NWP Equation of Time": "NWP EoT",
+            "NWP GHI": "NWP GHI",
+            "NWP DNI": "NWP DNI",
+            "NWP DHI": "NWP DHI",
+            "NWP Relative Airmass": "NWP RelAM",
+            "NWP Absolute Airmass": "NWP AbsAM",
+            "LMD Apparent Zenith": "LMD AppZen",
+            "LMD Zenith": "LMD Zen",
+            "LMD Apparent Elevation": "LMD AppEl",
+            "LMD Elevation": "LMD El",
+            "LMD Azimuth": "LMD Az",
+            "LMD Equation of Time": "LMD EoT",
+            "LMD GHI": "LMD GHI",
+            "LMD DNI": "LMD DNI",
+            "LMD DHI": "LMD DHI",
+            "LMD Relative Airmass": "LMD RelAM",
+            "LMD Absolute Airmass": "LMD AbsAM",
             # Trig features (sin/cos)
-            'Longitude_sin': 'Lon (Sin)',
-            'Longitude_cos': 'Lon (Cos)',
-            'DayOfYear_sin': 'DoY (Sin)',
-            'DayOfYear_cos': 'DoY (Cos)',
-            'MinuteOfDay_sin': 'MoD (Sin)',
-            'MinuteOfDay_cos': 'MoD (Cos)',
-
-            'NWP Wind Direction_sin': 'NWP WD (Sin)',
-            'NWP Wind Direction_cos': 'NWP WD (Cos)',
-            'LMD Wind Direction_sin': 'LMD WD (Sin)',
-            'LMD Wind Direction_cos': 'LMD WD (Cos)',
-
-            'NWP Apparent Elevation_sin': 'NWP AppEl (Sin)',
-            'NWP Apparent Elevation_cos': 'NWP AppEl (Cos)',
-            'NWP Apparent Zenith_sin': 'NWP AppZen (Sin)',
-            'NWP Apparent Zenith_cos': 'NWP AppZen (Cos)',
-            'NWP Azimuth_sin': 'NWP Az (Sin)',
-            'NWP Azimuth_cos': 'NWP Az (Cos)',
-            'NWP Elevation_sin': 'NWP El (Sin)',
-            'NWP Elevation_cos': 'NWP El (Cos)',
-            'NWP Zenith_sin': 'NWP Zen (Sin)',
-            'NWP Zenith_cos': 'NWP Zen (Cos)',
-
-            'LMD Apparent Elevation_sin': 'LMD AppEl (Sin)',
-            'LMD Apparent Elevation_cos': 'LMD AppEl (Cos)',
-            'LMD Apparent Zenith_sin': 'LMD AppZen (Sin)',
-            'LMD Apparent Zenith_cos': 'LMD AppZen (Cos)',
-            'LMD Azimuth_sin': 'LMD Az (Sin)',
-            'LMD Azimuth_cos': 'LMD Az (Cos)',
-            'LMD Elevation_sin': 'LMD El (Sin)',
-            'LMD Elevation_cos': 'LMD El (Cos)',
-            'LMD Zenith_sin': 'LMD Zen (Sin)',
-            'LMD Zenith_cos': 'LMD Zen (Cos)'
+            "Longitude_sin": "Lon (Sin)",
+            "Longitude_cos": "Lon (Cos)",
+            "DayOfYear_sin": "DoY (Sin)",
+            "DayOfYear_cos": "DoY (Cos)",
+            "MinuteOfDay_sin": "MoD (Sin)",
+            "MinuteOfDay_cos": "MoD (Cos)",
+            "NWP Wind Direction_sin": "NWP WD (Sin)",
+            "NWP Wind Direction_cos": "NWP WD (Cos)",
+            "LMD Wind Direction_sin": "LMD WD (Sin)",
+            "LMD Wind Direction_cos": "LMD WD (Cos)",
+            "NWP Apparent Elevation_sin": "NWP AppEl (Sin)",
+            "NWP Apparent Elevation_cos": "NWP AppEl (Cos)",
+            "NWP Apparent Zenith_sin": "NWP AppZen (Sin)",
+            "NWP Apparent Zenith_cos": "NWP AppZen (Cos)",
+            "NWP Azimuth_sin": "NWP Az (Sin)",
+            "NWP Azimuth_cos": "NWP Az (Cos)",
+            "NWP Elevation_sin": "NWP El (Sin)",
+            "NWP Elevation_cos": "NWP El (Cos)",
+            "NWP Zenith_sin": "NWP Zen (Sin)",
+            "NWP Zenith_cos": "NWP Zen (Cos)",
+            "LMD Apparent Elevation_sin": "LMD AppEl (Sin)",
+            "LMD Apparent Elevation_cos": "LMD AppEl (Cos)",
+            "LMD Apparent Zenith_sin": "LMD AppZen (Sin)",
+            "LMD Apparent Zenith_cos": "LMD AppZen (Cos)",
+            "LMD Azimuth_sin": "LMD Az (Sin)",
+            "LMD Azimuth_cos": "LMD Az (Cos)",
+            "LMD Elevation_sin": "LMD El (Sin)",
+            "LMD Elevation_cos": "LMD El (Cos)",
+            "LMD Zenith_sin": "LMD Zen (Sin)",
+            "LMD Zenith_cos": "LMD Zen (Cos)",
         }
 
-    def get_task(self) -> Literal['regression', 'classification']:
-        return 'regression'
+    def get_task(self) -> Literal["regression", "classification"]:
+        return "regression"
 
 
 def get_dataset(config: dict) -> BaseDataset:
@@ -906,4 +886,6 @@ def get_dataset(config: dict) -> BaseDataset:
     elif config["domain"] == "pv":
         return SolarDataset(config)
     else:
-        raise NotImplementedError(f"Dataset for domain={config['domain']} not implemented.")
+        raise NotImplementedError(
+            f"Dataset for domain={config['domain']} not implemented."
+        )
