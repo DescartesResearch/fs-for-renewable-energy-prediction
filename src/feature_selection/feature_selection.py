@@ -1045,6 +1045,14 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
             hpo_duration = hpo_end_time - hpo_start_time
             n_trials = automl._search_states[self.estimator_name].total_iter
 
+            # if warm starts is disabled, use best config from last iteration's as starting points for next iteration's HPO.
+            if not self.warm_starts:
+                ws_logs_parent_key = f"warmup/{self.curr_iteration+1}/{fold_id}"
+                self.logger.save_object(
+                    f"{ws_logs_parent_key}/starting_points",
+                    automl.best_config_per_estimator,
+                )
+
             curr_metrics = {"n_trials": n_trials, "duration": hpo_duration}
             self._console_log(
                 f"HPO done - {n_trials} Trials in {hpo_duration} seconds.",
