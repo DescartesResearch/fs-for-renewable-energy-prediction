@@ -81,6 +81,9 @@ def get_feature_selector(
             gap=config["gap"],
             datetimes=config["datetimes"],
             bootstrap_sample_size=config["bootstrap_sample_size"],
+            n_subags=config["n_subags"],
+            subag_fraction=config["subag_fraction"],
+            block_size=config["block_size"],
             n_features_to_select=config["n_features_to_select"],
             verbose=config["verbose"],
             hpo_mode=config["hpo_mode"],
@@ -310,6 +313,9 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         direction: str = "backward",
         cv: Optional[list[tuple] | Any] = None,
         bootstrap_sample_size: Optional[int] = None,
+        n_subags: int = 1,
+        subag_fraction: float = 1.0,
+        block_size: int = 1,
         n_features_to_select: int = 1,
         verbose=1,
         aggregation_mode: Literal["median", "mean", "min", "max"] = "median",
@@ -381,6 +387,9 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         self.aggregation_mode = aggregation_mode
         self.cv = cv
         self.bootstrap_sample_size = bootstrap_sample_size
+        self.n_subags = n_subags
+        self.subag_fraction = subag_fraction
+        self.block_size = block_size
         self.val_ratio = val_ratio
         self.gap = gap
         self.datetimes = datetimes
@@ -426,6 +435,11 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         if self.cv is not None and self.val_ratio is not None:
             raise ValueError("Either cv or val_ratio can be provided, not both.")
 
+        if self.cv is not None and self.n_subags > 1:
+            raise ValueError(
+                "Subagging and cv cannot be passed at the same time currently, since subagging generates a cv-like structure internally."
+            )
+
         if self.cv is None:
             train_val_indices = DataUtils.get_time_split_indices(
                 self.datetimes,
@@ -433,9 +447,25 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
                 split_ratio=(1 - self.val_ratio, self.val_ratio),
             )
             self.cv = [(train_val_indices[0], train_val_indices[1])]
+            if self.n_subags > 1:
+                self.cv = [
+                    (subag_train_indices, train_val_indices[1])
+                    for subag_train_indices in self._create_subags(
+                        train_indices=train_val_indices[0],
+                        n_subags=self.n_subags,
+                        subag_fraction=self.subag_fraction,
+                        block_size=self.block_size,
+                    )
+                ]
 
         if self.scoring not in self.metrics.keys():
             raise ValueError("scoring must be one of the provided metrics' keys.")
+
+        if block_size is None:
+            block_size = 1
+        if isinstance(block_size, str):
+            # Parse block_size as a pandas Timedelta string (e.g., "1D", "2H", etc.)
+            block_size = pd.to_timedelta(block_size)
 
         seed_everything(random_seed)
 
@@ -1192,10 +1222,6 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
                 else None,
             )
 
-            self._cluster_priorities[cluster_id] = self._aggregate(
-                validation_metrics[self.scoring]
-            )
-
             self.logger.log_metrics(
                 flatten_dict(
                     training_metrics,
@@ -1207,8 +1233,14 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
                 flatten_dict(
                     validation_metrics,
                     parent_key=f"validation/{self.curr_iteration}/{cluster_id}",
-                )
+                ),
+                on_conflict="extend",
             )
+        
+        self._cluster_priorities[cluster_id] = self._aggregate(
+            self.logger.fetch_values(f"validation/{self.curr_iteration}/{cluster_id}/{self.scoring}")
+        )
+
 
     def _aggregate(self, arr: np.ndarray) -> np.floating[Any]:
         return aggregate(self.aggregation_mode, arr)
@@ -1601,6 +1633,67 @@ class ClusterSequentialFeatureSelector(BaseEstimator, TransformerMixin):
         current_features.extend(self.fixed_features)
 
         return current_features
+
+    def _create_subags(
+        self,
+        train_indices: np.ndarray,
+        n_subags: int,
+        subag_fraction: float,
+        block_size: int,
+    ) -> list[np.ndarray]:
+        """
+        Creates subagging splits for the given train indices.
+        :param train_indices: Numpy array of train indices to create subags from.
+        :param n_subags: Number of subags to create.
+        :param subag_fraction: Fraction of the train set to include in each subag.
+        :param block_size: Optional block size for block bootstrapping. If None, standard bootstrapping is used.
+        :return: List of numpy arrays containing the indices for each subag.
+        """
+        if isinstance(block_size, int) and block_size > 1:
+            return self._create_block_bootstrap_indices(
+                base_indices=train_indices,
+                block_size=block_size,
+                n_samples=n_subags,
+                with_replacement=False,
+                sample_ratio=subag_fraction,
+            )
+        else:
+            raise ValueError(
+                "Invalid block_size. Must be None, an integer > 1, or a pd.Timedelta that can be converted to an integer > 1 based on the datetimes of the train indices."
+            )
+
+    @staticmethod
+    def _create_block_bootstrap_indices(
+        base_indices: np.ndarray,
+        block_size: int,
+        n_samples: int,
+        with_replacement: bool,
+        sample_ratio: float,
+    ) -> list[np.ndarray]:
+        """
+        Creates block bootstrap indices for the given base indices and block size.
+        :param base_indices: Numpy array of base indices to create block bootstrap indices from.
+        :param block_size: Block size for block bootstrapping (in number of samples).
+        :param n_samples: Number of bootstrap samples to create.
+        :param with_replacement: Whether to use replacement when sampling blocks.
+        :param sample_ratio: Ratio of the base indices to include in each bootstrap sample.
+        :return: List of numpy arrays containing the block bootstrap indices.
+        """
+        n_blocks = int(np.ceil(len(base_indices) * sample_ratio / block_size))
+        block_start_indices = [i * block_size for i in range(n_blocks)]
+        block_indices = [
+            base_indices[start_idx : start_idx + block_size]
+            for start_idx in block_start_indices
+        ]
+        bootstrap_indices = []
+        for _ in range(n_samples):
+            sampled_blocks = np.random.choice(
+                len(block_indices), size=n_blocks, replace=with_replacement
+            )
+            sampled_indices = np.concatenate([block_indices[i] for i in sampled_blocks])
+            bootstrap_indices.append(sampled_indices)
+
+        return bootstrap_indices
 
 
 class SequentialFeatureSelector(OriginalSequentialFeatureSelector):

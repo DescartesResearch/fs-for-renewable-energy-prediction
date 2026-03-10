@@ -1,5 +1,5 @@
 # Global defaults for experiments
-name: ???  # Required: experiment name
+name: debug  # Required: experiment name
 
 # Data splitting
 test_ratio: 0.25
@@ -17,29 +17,29 @@ overwrite: false
 dry_run: false
 
 dataset:
-  domain: ???  # Required: wind or pv
-  asset_id: ???  # Required
-  type: ???  # forecast_available or digital_twin
+  domain: wind  # Required: wind or pv
+  asset_id: T11  # Required
+  type: digital_twin  # forecast_available or digital_twin
 
 # Model configuration
 model:
-  name: ???  # Required: mlp, lgbm, gp, xgboost, rf
+  name: mlp  # Required: mlp, lgbm, gp, xgboost, rf
 
 # Feature selection
 feature_selection:
-  method: ???  # Required: SFS, CSFS, mutual_info, f_value, RF_FI
-  direction: ???  # forward or backward (required for SFS/CSFS)
+  method: CSFS  # Required: SFS, CSFS, mutual_info, f_value, RF_FI
+  direction: backward  # forward or backward (required for SFS/CSFS)
   clustering:
-    method: ???
-    group_size: ???
+    method: random
+    group_size: 3
   val_ratio: 0.333333
   fast_mode: true
   resume_at_iteration: null
-  n_features: ???  # Required
+  n_features: 2  # Required
 
 # Hyperparameter optimization
 hpo:
-  mode: ???  # on, off, per_iteration, per_feature_set
+  mode: per_iteration  # on, off, per_iteration, per_feature_set
   feature_level_mode: "off"
   time_budget: null
   max_iter: 25

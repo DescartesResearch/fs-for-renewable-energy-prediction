@@ -229,6 +229,19 @@ def validate_experiment_args(cfg: DictConfig):
             raise ValueError(
                 "You must specify either warm_start.max_iter or warm_start.time_budget, but not both."
             )
+        
+    if cfg.evaluation.block_size is not None:
+        if isinstance(cfg.evaluation.block_size, str):
+            try:
+                pd.to_timedelta(cfg.evaluation.block_size)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid block_size format: {cfg.evaluation.block_size}. Must be an integer or a string parseable by pandas to_timedelta (e.g., '1D', '2H', etc.)."
+                )
+        elif not (isinstance(cfg.evaluation.block_size, int) and cfg.evaluation.block_size > 0):
+            raise ValueError(
+                f"Invalid block_size: {cfg.evaluation.block_size}. Must be a positive integer or a string parseable by pandas to_timedelta."
+            )
 
 
 def run_experiment(cfg: DictConfig):
@@ -402,6 +415,10 @@ def run_experiment(cfg: DictConfig):
         }
     )
 
+    if isinstance(cfg.evaluation.block_size, str):
+        block_size_td = pd.to_timedelta(cfg.evaluation.block_size)
+        cfg.evaluation.block_size = np.floor(block_size_td / datetimes_train_val.diff().dropna().median()).astype(int).item()
+
     # Configuration for FS method
     fs_config = {
         "fs_method": cfg.feature_selection.method,
@@ -416,6 +433,9 @@ def run_experiment(cfg: DictConfig):
         "gap": pd.to_timedelta(cfg.gap),
         "datetimes": datetimes_train_val,
         "bootstrap_sample_size": cfg.evaluation.n_bootstrap_samples,
+        "n_subags": cfg.evaluation.n_subags,
+        "subag_fraction": cfg.evaluation.subag_fraction,
+        "block_size": cfg.evaluation.block_size,
         "n_features_to_select": cfg.feature_selection.n_features,
         "n_jobs": cfg.n_jobs,
         "verbose": 3,
