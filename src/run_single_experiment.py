@@ -457,48 +457,52 @@ def run_experiment(cfg: DictConfig):
     fslogger.save_object("feature_names_out", feature_selector.get_feature_names_out())
 
     logging.debug("Start fitting on test set.")
+    logging.debug(f"Seed_everything with seed {cfg.random_seed} before fitting on test set.")
+    seed_everything(cfg.random_seed)
+
     test_fit_kwargs = automl_settings.copy()
     test_fit_kwargs["retrain_full"] = True
-    if cfg.warm_start.enabled:
-        logging.debug("Start warmup")
-        warmup_est = get_automl_with_registered_models(models_to_register=[model_name])
-        warmup_est.fit(
-            X_train_val.copy().loc[:, feature_selector.get_feature_names_out()],
-            y_train_val.copy().values.ravel(),
-            **automl_ws_settings,
-        )
-        logging.debug("Finished warmup.")
-        test_fit_kwargs["starting_points"] = warmup_est.best_config_per_estimator
 
-    est = get_automl_with_registered_models(models_to_register=[model_name])
-
-    test_fit_start_time = time.perf_counter()
-    est.fit(
+    logging.debug("Start warmup for test fit")
+    warmup_est = get_automl_with_registered_models(models_to_register=[model_name])
+    warmup_est.fit(
         X_train_val.copy().loc[:, feature_selector.get_feature_names_out()],
         y_train_val.copy().values.ravel(),
-        **test_fit_kwargs,
-        log_file_name=automl_logdir / "testing" if automl_logdir is not None else None,
+        **automl_settings,
     )
-    test_fit_end_time = time.perf_counter()
-    test_fit_duration = test_fit_end_time - test_fit_start_time
-    logging.debug(
-        f"Test fit finished in {str(datetime.timedelta(seconds=test_fit_duration))}."
-    )
-    test_results = dict()
-    test_results["duration"] = test_fit_duration
-    test_results["n_trials"] = est._search_states[model_name].total_iter
-    fslogger.log_metrics(flatten_dict(test_results, parent_key="testing"))
+    logging.debug("Finished warmup.")
+    test_fit_kwargs["starting_points"] = warmup_est.best_config_per_estimator
 
-    testing_metrics = evaluate_on_test_set(
-        est,
-        X_test=X_test.copy().loc[:, feature_selector.get_feature_names_out()],
-        y_test=y_test.copy().values.ravel(),
-        scoring=Constants.METRICS,
-        bootstrap_sample_size=cfg.evaluation.n_bootstrap_samples,
-        test_set_bootstrap=cfg.evaluation.bootstrapping,
-    )
+    # fit multiple times to account for variability in fitting process
+    for i in range(cfg.evaluation.n_test_fits):
+        est = get_automl_with_registered_models(models_to_register=[model_name])
+        test_fit_start_time = time.perf_counter()
+        est.fit(
+            X_train_val.copy().loc[:, feature_selector.get_feature_names_out()],
+            y_train_val.copy().values.ravel(),
+            **test_fit_kwargs,
+            log_file_name=automl_logdir / "testing" if automl_logdir is not None else None,
+        )
+        test_fit_end_time = time.perf_counter()
+        test_fit_duration = test_fit_end_time - test_fit_start_time
+        logging.debug(
+            f"Test fit finished in {str(datetime.timedelta(seconds=test_fit_duration))}."
+        )
+        test_results = dict()
+        test_results["duration"] = test_fit_duration
+        test_results["n_trials"] = est._search_states[model_name].total_iter
+        fslogger.log_metrics(flatten_dict(test_results, parent_key="testing"))
 
-    fslogger.log_metrics_array(flatten_dict(testing_metrics, parent_key="testing"))
+        testing_metrics = evaluate_on_test_set(
+            est,
+            X_test=X_test.copy().loc[:, feature_selector.get_feature_names_out()],
+            y_test=y_test.copy().values.ravel(),
+            scoring=Constants.METRICS,
+            bootstrap_sample_size=cfg.evaluation.n_bootstrap_samples,
+            test_set_bootstrap=cfg.evaluation.bootstrapping,
+        )
+
+        fslogger.log_metrics_array(flatten_dict(testing_metrics, parent_key="testing"))
 
     fslogger.log_metrics_array(
         {
