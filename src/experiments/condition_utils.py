@@ -6,8 +6,17 @@ Used by MatrixGenerator, ConstraintValidator, and NamingEngine to avoid code dup
 
 from typing import Any, Dict
 
+def get_sub_dict(d: dict, key: str, key_sep: str = '.'):
+    """
+    Get nested sub-dictionary from a dictionary using a key with separators.
+    """
+    res_dict = d
+    for k in key.split(sep=key_sep):
+        res_dict = res_dict[k]
+    return res_dict.copy()
 
-def get_nested_value(params: Dict[str, Any], path: str) -> Any:
+
+def get_nested_value(params: Dict[str, Any], path: str, key_sep: str = ".") -> Any:
     """
     Get value from nested dict using dotted path notation.
     
@@ -20,11 +29,11 @@ def get_nested_value(params: Dict[str, Any], path: str) -> Any:
     
     Examples:
         >>> params = {"model": {"name": "lgbm"}, "domain": "pv"}
-        >>> get_nested_value(params, "model.name")
+        >>> get_nested_value(params, "model.name", key_sep=".")
         "lgbm"
         >>> get_nested_value(params, "domain")
         "pv"
-        >>> get_nested_value(params, "nonexistent.path")
+        >>> get_nested_value(params, "nonexistent.path", key_sep=".")
         None
     """
     # First try direct lookup (common case)
@@ -32,11 +41,11 @@ def get_nested_value(params: Dict[str, Any], path: str) -> Any:
         return params[path]
     
     # If no dot, it's a simple key lookup
-    if "." not in path:
+    if key_sep not in path:
         return params.get(path)
     
     # Navigate nested structure
-    parts = path.split(".")
+    parts = path.split(key_sep)
     current = params
     for part in parts:
         if not isinstance(current, dict) or part not in current:
@@ -45,7 +54,7 @@ def get_nested_value(params: Dict[str, Any], path: str) -> Any:
     return current
 
 
-def set_nested_value(params: Dict[str, Any], path: str, value: Any) -> None:
+def set_nested_value(params: Dict[str, Any], path: str, value: Any, key_sep: str = ".") -> None:
     """
     Set value in nested dict using dotted path notation.
     
@@ -53,18 +62,19 @@ def set_nested_value(params: Dict[str, Any], path: str, value: Any) -> None:
         params: Dictionary to modify
         path: Dotted path (e.g., "feature_selection.method")
         value: Value to set
-    
+        key_sep: Separator for the path
+
     Examples:
         >>> params = {}
-        >>> set_nested_value(params, "model.name", "lgbm")
+        >>> set_nested_value(params, "model.name", "lgbm", key_sep=".")
         >>> params
         {"model": {"name": "lgbm"}}
     """
-    if "." not in path:
+    if key_sep not in path:
         params[path] = value
         return
     
-    parts = path.split(".")
+    parts = path.split(key_sep)
     current = params
     for part in parts[:-1]:
         if part not in current or not isinstance(current[part], dict):
