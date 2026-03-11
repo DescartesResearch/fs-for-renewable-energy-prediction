@@ -191,7 +191,10 @@ def validate_experiment_args(cfg: DictConfig):
             f"Invalid feature set type: {cfg.dataset.type}. Must be in {Constants.FEATURE_SET_TYPES}."
         )
 
-    if cfg.feature_selection.n_features is None or cfg.feature_selection.n_features <= 0:
+    if (
+        cfg.feature_selection.n_features is None
+        or cfg.feature_selection.n_features <= 0
+    ):
         raise ValueError("Number of features to select must be a positive integer.")
 
     if cfg.random_seed is None:
@@ -250,6 +253,7 @@ def run_experiment(cfg: DictConfig):
     model_name = cfg.model.name
 
     fslogger = FSLogger(cfg["name"])
+    run_test_only = False
 
     if len(os.listdir(fslogger.log_dir)) > 0:
         if cfg["name"] == "debug" or cfg["overwrite"]:
@@ -258,6 +262,11 @@ def run_experiment(cfg: DictConfig):
             )
             shutil.rmtree(fslogger.log_dir)
             fslogger.log_dir.mkdir(parents=True, exist_ok=True)
+        elif not fslogger.has_key("testing"):
+            logging.warning(
+                f"Experiment with name {cfg['name']} already exists in {fslogger.log_dir}, but no testing metrics found. Running test fit and evaluation on existing experiment results."
+            )
+            run_test_only = True
         elif cfg.feature_selection.resume_at_iteration is not None:
             logging.debug(
                 f"Resuming experiment {cfg['name']} at iteration {cfg.feature_selection.resume_at_iteration}."
@@ -437,68 +446,85 @@ def run_experiment(cfg: DictConfig):
         "task": dataset.get_task(),
     }
 
-    feature_selector = get_feature_selector(fslogger, fs_config)
+    if not run_test_only:
+        feature_selector = get_feature_selector(fslogger, fs_config)
+        logging.debug("Start feature selection process.")
+        fs_start_time = time.perf_counter()
+        feature_selector.fit(
+            X=X_train_val.copy(),
+            y=y_train_val.copy().values.ravel(),
+        )
+        fs_end_time = time.perf_counter()
+        fs_runtime = fs_end_time - fs_start_time
+        logging.debug(
+            f"Feature selection finished in {str(datetime.timedelta(seconds=fs_runtime))}. Selected features: {feature_selector.get_feature_names_out()}"
+        )
 
-    logging.debug("Start feature selection process.")
-    fs_start_time = time.perf_counter()
-    feature_selector.fit(
-        X=X_train_val.copy(),
-        y=y_train_val.copy().values.ravel(),
-    )
-    fs_end_time = time.perf_counter()
-    fs_runtime = fs_end_time - fs_start_time
-    logging.debug(
-        f"Feature selection finished in {str(datetime.timedelta(seconds=fs_runtime))}. Selected features: {feature_selector.get_feature_names_out()}"
-    )
+        fslogger.log_metrics({"fs_runtime": fs_runtime})
 
-    fslogger.log_metrics({"fs_runtime": fs_runtime})
+        # fslogger.save_object("csfs", feature_selector)
+        fslogger.save_object(
+            "feature_names_out", feature_selector.get_feature_names_out()
+        )
 
-    # fslogger.save_object("csfs", feature_selector)
-    fslogger.save_object("feature_names_out", feature_selector.get_feature_names_out())
+    feature_names_out = fslogger.fetch_object("feature_names_out")
+    if feature_names_out is None:
+        raise ValueError(
+            "Selected feature names not found in logger. Cannot proceed with test fitting and evaluation. Make sure that feature names are logged with key 'feature_names_out' at the end of the feature selection process."
+        )
 
     logging.debug("Start fitting on test set.")
+    logging.debug(
+        f"Seed_everything with seed {cfg.random_seed} before fitting on test set."
+    )
+    seed_everything(cfg.random_seed)
+
     test_fit_kwargs = automl_settings.copy()
     test_fit_kwargs["retrain_full"] = True
-    if cfg.warm_start.enabled:
-        logging.debug("Start warmup")
-        warmup_est = get_automl_with_registered_models(models_to_register=[model_name])
-        warmup_est.fit(
-            X_train_val.copy().loc[:, feature_selector.get_feature_names_out()],
-            y_train_val.copy().values.ravel(),
-            **automl_ws_settings,
-        )
-        logging.debug("Finished warmup.")
-        test_fit_kwargs["starting_points"] = warmup_est.best_config_per_estimator
 
-    est = get_automl_with_registered_models(models_to_register=[model_name])
-
-    test_fit_start_time = time.perf_counter()
-    est.fit(
-        X_train_val.copy().loc[:, feature_selector.get_feature_names_out()],
+    logging.debug("Start warmup for test fit")
+    warmup_est = get_automl_with_registered_models(models_to_register=[model_name])
+    warmup_est.fit(
+        X_train_val.copy().loc[:, feature_names_out],
         y_train_val.copy().values.ravel(),
-        **test_fit_kwargs,
-        log_file_name=automl_logdir / "testing" if automl_logdir is not None else None,
+        **automl_settings,
     )
-    test_fit_end_time = time.perf_counter()
-    test_fit_duration = test_fit_end_time - test_fit_start_time
-    logging.debug(
-        f"Test fit finished in {str(datetime.timedelta(seconds=test_fit_duration))}."
-    )
-    test_results = dict()
-    test_results["duration"] = test_fit_duration
-    test_results["n_trials"] = est._search_states[model_name].total_iter
-    fslogger.log_metrics(flatten_dict(test_results, parent_key="testing"))
+    logging.debug("Finished warmup.")
+    test_fit_kwargs["starting_points"] = warmup_est.best_config_per_estimator
 
-    testing_metrics = evaluate_on_test_set(
-        est,
-        X_test=X_test.copy().loc[:, feature_selector.get_feature_names_out()],
-        y_test=y_test.copy().values.ravel(),
-        scoring=Constants.METRICS,
-        bootstrap_sample_size=cfg.evaluation.n_bootstrap_samples,
-        test_set_bootstrap=cfg.evaluation.bootstrapping,
-    )
+    # fit multiple times to account for variability in fitting process
+    for i in range(cfg.evaluation.n_test_fits):
+        est = get_automl_with_registered_models(models_to_register=[model_name])
+        test_fit_start_time = time.perf_counter()
+        est.fit(
+            X_train_val.copy().loc[:, feature_names_out],
+            y_train_val.copy().values.ravel(),
+            **test_fit_kwargs,
+            log_file_name=automl_logdir / "testing"
+            if automl_logdir is not None
+            else None,
+        )
+        test_fit_end_time = time.perf_counter()
+        test_fit_duration = test_fit_end_time - test_fit_start_time
+        logging.debug(
+            f"Test fit finished in {str(datetime.timedelta(seconds=test_fit_duration))}."
+        )
+        test_results = dict()
+        test_results["duration"] = test_fit_duration
+        test_results["n_trials"] = est._search_states[model_name].total_iter
+        fslogger.log_metrics(flatten_dict(test_results, parent_key="testing"))
 
-    fslogger.log_metrics_array(flatten_dict(testing_metrics, parent_key="testing"))
+        testing_metrics = evaluate_on_test_set(
+            est,
+            X_test=X_test.copy().loc[:, feature_names_out],
+            y_test=y_test.copy().values.ravel(),
+            scoring=Constants.METRICS,
+            bootstrap_sample_size=cfg.evaluation.n_bootstrap_samples,
+            test_set_bootstrap=cfg.evaluation.bootstrapping,
+            bootstrap_indices=test_bootstrap_indices,
+        )
+
+        fslogger.log_metrics_array(flatten_dict(testing_metrics, parent_key="testing"))
 
     fslogger.log_metrics_array(
         {

@@ -59,6 +59,7 @@ evaluation:
   n_folds: null
   bootstrapping: true
   n_bootstrap_samples: 100
+  n_test_fits: 10
 
 # Report
 report:
