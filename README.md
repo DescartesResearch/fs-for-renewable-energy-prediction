@@ -12,9 +12,9 @@ Table of contents
     - [Necessary steps](#necessary-steps)
 - [Usage examples](#usage-examples)
     - [Re-run the experiments from the paper](#re-run-the-experiments-from-the-paper)
-    - [Generate report](#generate-report)
     - [Run a custom experiment](#run-a-custom-experiment)
-- [Project layout](#project-layout)
+    - [Generate report](#generate-report)
+- [Source directory layout](#source-directory-layout)
 - [CSFS algorithm pseudocode](#csfs-algorithm-pseudocode)
 - [If you need help...](#if-you-need-help)
 
@@ -29,16 +29,17 @@ Primary capabilities
 
 - Load datasets and standardize preprocessing pipelines
 - Extract feature sets by tag (forecast-available, digital-twin, cyclical/circular, etc.)
-- Run SFS and CSFS feature selection with optional HPO per step
-- Use FLAML AutoML to train and tune models with custom estimator wrappers
+- Run SFS and CSFS feature selection with configurable hyperparameter tuning
 - Log experiments to a filesystem logger
+- Reproducing analysis in the paper
 
 ## Why it is useful
 
-- Research-ready: Designed for reproducible experiments and logging of results/artifacts
-- Flexible: Supports multiple domains (wind and pv energy) and model types
-- Scalable experiments: HPO (optionally with warm-starting) and parallel runs
-- Ready-to-extend: Extensible by adding new datasets, models, or feature selection methods
+- The proposed feature selection method is easy to use (inherits from scikit-learn modules)
+- Reproducibility of the claims
+- Flexible: multiple domains (wind and pv energy) and model types
+- Scalable experiments with parallel runs
+- Ready-to-extend: extensible by adding new datasets, models, or feature selection methods
 
 ## Getting started
 
@@ -94,32 +95,19 @@ No manual setup needed.
 
 #### 3. Configuration
 
-<details>
-<summary><strong>Docker</strong></summary>
+Create an .env file in the project root directory and set the following variables:
 
-Adapt the environment variables in the `.env` file.
+- `LOGS_DIR`: This is where the logs and results of the experiments will be saved, including for instance the best hyperparameters, metrics, selected features, ...
+- `DATASETS_DIR`: The dataset path should contain the two subfolders `edp` and `PVOD` with the respective downloaded (and extracted) datasets. Folder can be empty if you only want to use the provided logs from the experiments in the paper.
+- `EXP_CONFIG_DIR`: Should contain a base configuration `base.yaml` and a sub-directory `matrices` with configurable experiment parameter ranges and constraints.
+- `REPORT_DIR`: This is where the reports (as Jupyter Notebooks) will be saved.
+- `LITERATURE_STUDY_DIR`: Contains the csv-files with the literature study.
 
-</details>
-
-<details>
-<summary><strong>Local</strong></summary>
-
-- In the config file `config/constants.py`, set the path to the datasets folder `Paths.DATASETS` correctly.
-</details>
-
-The dataset path should contain the two subfolders `edp` and `PVOD` with the respective downloaded (and extracted)
-datasets. Folder can be empty if you only want to use the provided logs from the experiments in the paper.
-
-The logs path is where the experiment logs will be saved. You can also use the provided logs in the following Zenodo
-repository, if you want to skip running the experiments yourself: (Link removed for double-blind review.)
-
-The report path is where the generated figures, tables, and numbers from the paper will be saved.
+An example .env file is provided: `.env.example`
 
 ## Usage examples
 
 ### Re-run the experiments from the paper
-
-
 
 <details>
 <summary><strong>Docker</strong></summary>
@@ -134,32 +122,42 @@ docker compose up run_paper_experiments
 <summary><strong>Local</strong></summary>
 
 ```bash
-uv run ./src/main.py
-            --run_multiple_experiments
-            --n_jobs 4
-            --first_cpu_idx 0
-            --last_cpu_idx 15
-            --script_path "./src/paper_experiments.sh"
-            --first_experiment_idx 0
-            --last_experiment_idx 559
+uv run ./src/run_paper_experiments.py run paper_grid.yaml
 ```
 
 </details>
 
-The `n_jobs` variable defines how many CPU cores will be used per experiment. All CPU cores between `first_cpu_idx` and
-`last_cpu_idx` (incl.) will be used to run experiments in parallel.
-In the example above, CPU cores 0 to 15 (16 cores) will be used, with 4 cores per experiment, resulting in 4 experiments
-running in parallel.
-The `paper_experiments.sh` script contains the definition of all experiments (in total: 560) conducted for the paper.
+This will launch all experiments defined in `paper_grid.yaml` in `${EXP_CONFIG_PATH}/matrices`.
+The base configuration is configured in `${EXP_CONFIG_PATH}/base.yaml`.
+The logs and results will be saved to `${LOGS_DIR}`. You can also download the original logs from [Figshare](https://figshare.com/s/43f9aebe17725b29eeed).
+
+
+### Run a custom experiment
+
+You can also run custom experiments by specifying the desired configuration in `${EXP_CONFIG_PATH}/custom_config.yaml`.
+
+<details>
+<summary><strong>Docker</strong></summary>
+
+```bash
+docker compose up --rm main --config_name custom_config
+```
+
+</details>
+
+<details>
+<summary><strong>Local</strong></summary>
+
+```bash
+uv run ./src/main.py --config_name custom_config
+```
+
+</details>
 
 ### Generate report
+Requires that the experiments finished and the resulting logs are stored in `${LOGS_DIR}`. Alternatively, you can download the original logs from our [Figshare repository](https://figshare.com/s/43f9aebe17725b29eeed).
 
-After the experiments have finished and all experiment logs are saved to the logs directory (defined above), you can
-generate the report (figures, tables, numbers).
-Alternatively, instead of re-running the experiments yourself, you can use the provided logs in the following Zenodo
-repository: (Link removed for double-blind review.)
-
-The report generation script can be executed as follows:
+The two Jupyter Notebooks and a pickled results pandas dataframe will be saved to `${REPORT_DIR}`. The first notebook takes only a few seconds, while the second notebook takes about 4 minutes on a MacBook Air M2.
 
 <details>
 <summary><strong>Docker</strong></summary>
@@ -170,97 +168,30 @@ docker compose up generate_report
 
 </details>
 
-
 <details>
 <summary><strong>Local</strong></summary>
 
 ```bash
-uv run ./src/main.py --generate_report
+uv run ./src/evaluate_notebooks.py
 ```
 
 </details>
 
-### Run a custom experiment
-
-You can also run custom experiments by specifying the desired parameters directly via CLI arguments.
-
-Example command to run a CSFS experiment with MLP model on wind turbine dataset, and FI-based clustering:
-
-<details>
-<summary><strong>Docker</strong></summary>
-
-```bash
-docker compose run --rm main
---run_single_experiment
---name wind-T11_mlp_n-2_digital_twin_csfs-feature_importance-gs3_per_feature_set
---hpo_train_time_limit 60
---hpo_max_iter 25
---hpo_early_stop
---warm_starts
---warmup_max_iter 25
---warmup_early_stop
---bootstrapping
---n_bootstrap_samples 100
---n_jobs 2
---random_seed 27
---domain wind
---asset_id T11
---model mlp
---features digital_twin
---n_features 2
---hpo_mode per_feature_set
---fs_method CSFS
---fast_mode
---direction backward
---clustering_method feature_importance
---group_size 3
-```
-
-</details>
-
-<details>
-<summary><strong>Local</strong></summary>
-
-```bash
-uv run ./src/main.py
---run_single_experiment
---name wind-T11_mlp_n-2_digital_twin_csfs-feature_importance-gs3_per_feature_set
---hpo_train_time_limit 60
---hpo_max_iter 25
---hpo_early_stop
---warm_starts
---warmup_max_iter 25
---warmup_early_stop
---bootstrapping
---n_bootstrap_samples 100
---n_jobs 2
---random_seed 27
---domain wind
---asset_id T11
---model mlp
---features digital_twin
---n_features 2
---hpo_mode per_feature_set
---fs_method CSFS
---fast_mode
---direction backward
---clustering_method feature_importance
---group_size 3
-```
-
-</details>
-
-## Project layout
+## Source directory layout
 
 - `config/` — constants and path helpers (`config/constants.py`)
 - `data/` — dataset loading and preprocessing utilities
+- `experiments/` - contains scripts for managing and launching experiments
 - `feature_selection/` — CSFS, SFS and filter-based feature selection implementations
 - `models/` — model wrappers and FLAML estimator integrations with HPO search spaces
-- `training/` — logging helpers and experiment runners
+- `mplstyles/` - Matplotlib configuration files
+- `notebooks/` - Notebooks with literature review and experiment results analysis
+- `results_analysis` - Utils used in the notebooks for results analysis
+- `training/` — logging helpers for logging to filesystem during training and feature selection
 - `utils/` — evaluation, plotting and misc. helpers
-- `main.py` — CLI entrypoint to re-run experiments and generate report
-- `run_single_experiment.py` — Runner for single custom experiments
-- `run_multiple_experiments.py` - Orchestrator for multiple experiments in parallel
+- `main.py` — CLI entrypoint to run a single experiment
+- `run_paper_experiments.py` — CLI tool for running multiple experiments in parallel, e.g., to reproduce the paper results
+- `run_single_experiment.py` - Contains logic for execution of a single experiment (used in `main.py`)
 
 ## CSFS algorithm pseudocode
 

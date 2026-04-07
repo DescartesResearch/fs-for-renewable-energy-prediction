@@ -4,37 +4,38 @@ services:
     entrypoint: [ "uv", "run", "./src/main.py" ]
     volumes:
       - ./src:/app/src
-      - ${REPORT_DIR:-./outputs}:/app/report
+      - ${REPORT_DIR}:/app/report
       - ${DATASETS_DIR}:/app/datasets
       - ${LOGS_DIR}:/app/logs
+      - ${EXP_CONFIG_DIR}:/app/exp_configs
+    environment:
+      - PYTHONPATH=/app/src
     env_file: .env
 
   run_paper_experiments:
     build: .
     profiles: [ "run_paper_experiments" ]
-    entrypoint: [ "uv", "run", "./src/main.py",
-                  "--run_multiple_experiments",
-                  "--n_jobs", "${N_JOBS}",
-                  "--first_cpu_idx", "${FIRST_CPU_IDX}",
-                  "--last_cpu_idx", "${LAST_CPU_IDX}",
-                  "--script_path", "./src/paper_experiments.sh",
-                  "--first_experiment_idx", "0",
-                  "--last_experiment_idx", "559" ]
+    entrypoint: [ "uv", "run", "./src/run_paper_experiments.py", "run", "paper_grid.yaml" ]
     volumes:
       - ./src:/app/src
       - ${DATASETS_DIR}:/app/datasets
       - ${LOGS_DIR}:/app/logs
+      - ${EXP_CONFIG_DIR}:/app/exp_configs
+    environment:
+      - PYTHONPATH=/app/src
     env_file: .env
 
   generate_report:
     build: .
     profiles: [ "generate_report" ]
-    entrypoint: [ "uv", "run", "./src/main.py",
-                  "--generate_report",
-    ]
+    entrypoint: [ "uv", "run", "./src/evaluate_notebooks.py" ]
     volumes:
       - ./src:/app/src
-      - ${REPORT_DIR:-./outputs}:/app/report
+      - ${REPORT_DIR}:/app/report
       - ${DATASETS_DIR}:/app/datasets
       - ${LOGS_DIR}:/app/logs
+      - ${EXP_CONFIG_DIR}:/app/exp_configs
+      - ${LITERATURE_STUDY_DIR}:/app/literature_study
+    environment:
+      - PYTHONPATH=/app/src
     env_file: .env

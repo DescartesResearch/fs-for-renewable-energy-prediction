@@ -39,7 +39,6 @@ root_logger.addHandler(console_handler)
 
 # Set torch matmul precision and limit memory usage
 torch.set_float32_matmul_precision("high")
-limit_memory(Constants.MEMORY_LIMIT)
 
 if torch.cuda.is_available():
     # print("Using GPU.")

@@ -1,9 +1,9 @@
 .venv
+.vscode
 .idea
 .github
 .env
+.DS_Store
 logs
 outputs
-report
-report_test
 *.pyc

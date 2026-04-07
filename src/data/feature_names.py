@@ -1,8 +1,10 @@
+from typing import Optional
+
 def get_features_by_tags(
         feature_tags: dict,
-        tags_include_all: set | list = None,
-        tags_include_any: set | list = None,
-        tags_exclude: set | list = None
+        tags_include_all: Optional[set | list] = None,
+        tags_include_any: Optional[set | list] = None,
+        tags_exclude: Optional[set | list] = None
 ) -> list:
     """
     Filter features by tags with support for intersection (all), union (any), and exclusion.

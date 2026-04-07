@@ -1,0 +1,69 @@
+# Global defaults for experiments
+name: ???  # Required: experiment name
+
+# Data splitting
+test_ratio: 0.25
+gap: "1D"
+
+# Parallelism and randomness
+n_jobs: 2
+random_seed: 42
+
+# Resource management
+min_memory_bytes: 20000000000
+
+# Experiment management
+overwrite: false
+dry_run: false
+
+dataset:
+  domain: ???  # Required: wind or pv
+  asset_id: ???  # Required
+  type: ???  # forecast_available or digital_twin
+
+# Model configuration
+model:
+  name: ???  # Required: mlp, lgbm, gp, xgboost, rf
+
+# Feature selection
+feature_selection:
+  method: ???  # Required: SFS, CSFS, mutual_info, f_value, RF_FI
+  direction: ???  # forward or backward (required for SFS/CSFS)
+  clustering:
+    method: ???
+    group_size: ???
+  val_ratio: 0.333333
+  fast_mode: true
+  resume_at_iteration: null
+  n_features: ???  # Required
+
+# Hyperparameter optimization
+hpo:
+  mode: ???  # on, off, per_iteration, per_feature_set
+  feature_level_mode: "off"
+  time_budget: null
+  max_iter: 25
+  early_stop: true
+  train_time_limit: 60
+
+# Warm start configuration
+warm_start:
+  enabled: false
+  time_budget: null
+  max_iter: null
+  early_stop: true
+
+# Evaluation
+evaluation:
+  cv: false
+  n_folds: null
+  bootstrapping: true
+  n_bootstrap_samples: 100
+  n_test_fits: 10
+
+# Report
+report:
+  exclude_figures: false
+  exclude_latex: false
+  exclude_csv: false
+

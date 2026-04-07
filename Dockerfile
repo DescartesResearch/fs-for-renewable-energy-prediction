@@ -17,6 +17,7 @@ RUN apt-get update && \
 # COPY ./src /app/src
 COPY ./pyproject.toml /app/pyproject.toml
 COPY ./uv.lock /app/uv.lock
+COPY ./.container.env /app/.env
 
 # Disable development dependencies
 ENV UV_NO_DEV=1

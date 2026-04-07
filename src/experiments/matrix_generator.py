@@ -11,6 +11,8 @@ from pathlib import Path
 from itertools import product
 import logging
 
+from config.constants import Paths
+
 from .condition_utils import (
     get_nested_value,
     set_nested_value,
@@ -35,7 +37,7 @@ class MatrixGenerator:
         """
         if matrix_dir is None:
             matrix_dir = (
-                Path(__file__).parent.parent / "config" / "experiments" / "matrices"
+                Paths.EXP_CONFIG_PATH / "matrices"
             )
         self.matrix_dir = Path(matrix_dir)
         self.raise_on_error = raise_on_error
